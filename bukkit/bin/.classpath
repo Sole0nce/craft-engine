@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<classpath>
+	<classpathentry kind="src" path=""/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/core/build/libs/core.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/bukkit/build/libs/bukkit.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/bukkit/build/libs/craft-engine-bukkit-26.4-SNAPSHOT.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/bukkit/legacy/build/libs/legacy.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/bukkit/legacy/build/libs/legacy-all.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/bukkit/compatibility/build/libs/compatibility.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/bukkit/compatibility/legacy/build/libs/legacy.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/Documents/GitHub/craft-engine/common-files/build/libs/common-files.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/.gradle/caches/modules-2/files-2.1/cn.gtemc/itembridge/1.0.25/331e7374db41eb31a6cd517665a5868844d69848/itembridge-1.0.25.jar" sourcepath="C:/Users/soleo/.gradle/caches/modules-2/files-2.1/cn.gtemc/itembridge/1.0.25/a78f27c6d394f3682fd04f3458b2b3674e84726c/itembridge-1.0.25-sources.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/.gradle/caches/modules-2/files-2.1/cn.gtemc/levelerbridge/1.0.8/297a83aa6023821475f25bf28fd887d0b9fc44e1/levelerbridge-1.0.8.jar" sourcepath="C:/Users/soleo/.gradle/caches/modules-2/files-2.1/cn.gtemc/levelerbridge/1.0.8/38edcdf9f838cc0a770cfef2a6c1884e0e9d03d9/levelerbridge-1.0.8-sources.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/.gradle/caches/modules-2/files-2.1/net.momirealms/craft-engine-s3/0.19/888e9b6f56890c4222ab1b09669ccc032fded62f/craft-engine-s3-0.19.jar"/>
+	<classpathentry kind="lib" path="C:/Users/soleo/.gradle/caches/modules-2/files-2.1/net.momirealms/craft-engine-nms-helper-mojmap/1.0.200/c04a766af436760b2e3202450ddfbf0289f0aa34/craft-engine-nms-helper-mojmap-1.0.200.jar"/>
+	<classpathentry kind="output" path="bin"/>
+</classpath>

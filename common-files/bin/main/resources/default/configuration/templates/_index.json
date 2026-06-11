@@ -1,0 +1,4 @@
+{
+  "directory": [],
+  "file": ["block_settings.yml", "block_states.yml", "events.yml", "loot_tables.yml", "models.yml", "recipes.yml", "tool_levels.yml"]
+}

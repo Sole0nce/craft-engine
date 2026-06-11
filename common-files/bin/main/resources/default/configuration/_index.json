@@ -1,0 +1,4 @@
+{
+  "directory": ["blocks", "furniture", "items", "templates"],
+  "file": ["categories.yml", "emoji.yml", "lang.yml"]
+}
