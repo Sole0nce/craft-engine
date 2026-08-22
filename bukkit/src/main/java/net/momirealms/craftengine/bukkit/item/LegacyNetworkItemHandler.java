@@ -1,5 +1,8 @@
 package net.momirealms.craftengine.bukkit.item;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+
 import net.momirealms.craftengine.bukkit.util.ItemStackUtils;
 import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.Item;
@@ -15,7 +18,6 @@ import net.momirealms.craftengine.core.plugin.context.NetworkTextReplaceContext;
 import net.momirealms.craftengine.core.plugin.text.component.ComponentProvider;
 import net.momirealms.craftengine.core.util.AdventureHelper;
 import net.momirealms.craftengine.core.util.Pair;
-import net.momirealms.craftengine.proxy.bukkit.craftbukkit.inventory.CraftItemStackProxy;
 import net.momirealms.craftengine.proxy.minecraft.nbt.ByteTagProxy;
 import net.momirealms.craftengine.proxy.minecraft.nbt.CompoundTagProxy;
 import net.momirealms.craftengine.proxy.minecraft.nbt.ListTagProxy;
@@ -51,7 +53,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
                 Object previousItem = ItemStackProxy.INSTANCE.of(tag);
                 Optional<ItemStack> itemStack = BukkitItemManager.instance().c2s(ItemStackUtils.getBukkitStack(previousItem));
                 if (itemStack.isPresent()) {
-                    newItems.add(CraftItemStackProxy.INSTANCE.unwrap(itemStack.get()));
+                    newItems.add(ItemStackUtils.unwrap(itemStack.get()));
                     changed = true;
                 } else {
                     newItems.add(previousItem);
@@ -79,7 +81,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
                     Optional<ItemStack> itemStack = BukkitItemManager.instance().c2s(ItemStackUtils.getBukkitStack(previousItem));
                     byte slot = ByteTagProxy.INSTANCE.value(CompoundTagProxy.INSTANCE.get(tag, "Slot"));
                     if (itemStack.isPresent()) {
-                        newItems.add(Pair.of(slot, CraftItemStackProxy.INSTANCE.unwrap(itemStack.get())));
+                        newItems.add(Pair.of(slot, ItemStackUtils.unwrap(itemStack.get())));
                         changed = true;
                     } else {
                         newItems.add(Pair.of(slot, previousItem));
@@ -137,7 +139,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
                 Object previousItem = ItemStackProxy.INSTANCE.of(tag);
                 Optional<ItemStack> itemStack = BukkitItemManager.instance().s2c(ItemStackUtils.getBukkitStack(previousItem), player);
                 if (itemStack.isPresent()) {
-                    newItems.add(CraftItemStackProxy.INSTANCE.unwrap(itemStack.get()));
+                    newItems.add(ItemStackUtils.unwrap(itemStack.get()));
                     changed = true;
                 } else {
                     newItems.add(previousItem);
@@ -165,7 +167,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
                     Optional<ItemStack> itemStack = BukkitItemManager.instance().s2c(ItemStackUtils.getBukkitStack(previousItem), player);
                     byte slot = ByteTagProxy.INSTANCE.value(CompoundTagProxy.INSTANCE.get(tag, "Slot"));
                     if (itemStack.isPresent()) {
-                        newItems.add(Pair.of(slot, CraftItemStackProxy.INSTANCE.unwrap(itemStack.get())));
+                        newItems.add(Pair.of(slot, ItemStackUtils.unwrap(itemStack.get())));
                         changed = true;
                     } else {
                         newItems.add(Pair.of(slot, previousItem));
@@ -194,6 +196,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
             return new OtherItem(wrapped, forceReturn).process(NetworkTextReplaceContext.of(player));
         }
 
+        // legacy 物品无需保留 original副本，因为不存在组件默认值设定
         // 应用 client-bound-material
         BukkitItemDefinition customItem = (BukkitItemDefinition) optionalCustomItem.get();
         if (customItem.hasClientboundMaterial() && ItemStackProxy.INSTANCE.getItem(wrapped.minecraftItem()) != customItem.clientItem()) {
@@ -212,7 +215,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
         // 应用client-bound-data
         CompoundTag tag = new CompoundTag();
         // 创建context
-        NetworkItemBuildContext context = NetworkItemBuildContext.of(player);
+        NetworkItemBuildContext context = NetworkItemBuildContext.of(player, wrapped);
         // 准备阶段
         for (ItemProcessor modifier : customItem.clientBoundProcessors()) {
             modifier.prepareNetworkItem(wrapped, context, tag);
@@ -228,7 +231,7 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
         }
         // 应用阶段
         for (ItemProcessor modifier : customItem.clientBoundProcessors()) {
-            modifier.apply(wrapped, context);
+            wrapped = modifier.apply(wrapped, context);
         }
         // 如果tag不空，则需要返回
         if (!tag.isEmpty()) {
@@ -239,13 +242,13 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
     }
 
     public static boolean processCustomName(Item item, BiConsumer<String, CompoundTag> callback, Context context) {
-        Optional<String> optionalCustomName = item.customNameJson();
+        Optional<JsonElement> optionalCustomName = item.customNameJson();
         if (optionalCustomName.isPresent()) {
-            String line = optionalCustomName.get();
-            Map<String, ComponentProvider> tokens = CraftEngine.instance().networkManager().matchNetworkTags(line);
+            JsonElement json = optionalCustomName.get();
+            Map<String, ComponentProvider> tokens = CraftEngine.instance().networkManager().matchNetworkTags(json);
             if (!tokens.isEmpty()) {
-                item.customNameJson(AdventureHelper.componentToJson(AdventureHelper.replaceText(AdventureHelper.jsonToComponent(line), tokens, context)));
-                callback.accept("display.Name", NetworkItemHandler.pack(Operation.ADD, new StringTag(line)));
+                item.customNameJson(AdventureHelper.componentToJsonElement(AdventureHelper.replaceText(AdventureHelper.jsonElementToComponent(json), tokens, context)));
+                callback.accept("display.Name", NetworkItemHandler.pack(Operation.ADD, new StringTag(json.toString())));
                 return true;
             }
         }
@@ -253,25 +256,25 @@ public final class LegacyNetworkItemHandler implements NetworkItemHandler {
     }
 
     private static boolean processLore(Item item, BiConsumer<String, CompoundTag> callback, Context context) {
-        Optional<List<String>> optionalLore = item.loreJson();
+        Optional<JsonArray> optionalLore = item.loreJson();
         if (optionalLore.isPresent()) {
             boolean changed = false;
-            List<String> lore = optionalLore.get();
-            List<String> newLore = new ArrayList<>(lore.size());
-            for (String line : lore) {
-                Map<String, ComponentProvider> tokens = CraftEngine.instance().networkManager().matchNetworkTags(line);
+            JsonArray lore = optionalLore.get();
+            JsonArray newLore = new JsonArray();
+            for (JsonElement element : lore) {
+                Map<String, ComponentProvider> tokens = CraftEngine.instance().networkManager().matchNetworkTags(element);
                 if (tokens.isEmpty()) {
-                    newLore.add(line);
+                    newLore.add(element);
                 } else {
-                    newLore.add(AdventureHelper.componentToJson(AdventureHelper.replaceText(AdventureHelper.jsonToComponent(line), tokens, context)));
+                    newLore.add(AdventureHelper.componentToJsonElement(AdventureHelper.replaceText(AdventureHelper.jsonElementToComponent(element), tokens, context)));
                     changed = true;
                 }
             }
             if (changed) {
                 item.loreJson(newLore);
                 ListTag listTag = new ListTag();
-                for (String line : lore) {
-                    listTag.add(new StringTag(line));
+                for (JsonElement element : lore) {
+                    listTag.add(new StringTag(element.toString()));
                 }
                 callback.accept("display.Lore", NetworkItemHandler.pack(Operation.ADD, listTag));
                 return true;

@@ -41,8 +41,10 @@ items:
   default:topaz_pickaxe:
     material: golden_pickaxe
     settings:
+      break_power: 3
       tags:
         - default:topaz_tools
+        - minecraft:pickaxes
     data:
       item_name: <!i><#FF8C00><lang:item.default.topaz_pickaxe>
       tooltip_style: minecraft:topaz
@@ -51,8 +53,10 @@ items:
   default:topaz_axe:
     material: golden_axe
     settings:
+      break_power: 3
       tags:
         - default:topaz_tools
+        - minecraft:axes
     data:
       item_name: <!i><#FF8C00><lang:item.default.topaz_axe>
       tooltip_style: minecraft:topaz
@@ -61,8 +65,10 @@ items:
   default:topaz_hoe:
     material: golden_hoe
     settings:
+      break_power: 3
       tags:
         - default:topaz_tools
+        - minecraft:hoes
     data:
       item_name: <!i><#FF8C00><lang:item.default.topaz_hoe>
       tooltip_style: minecraft:topaz
@@ -71,7 +77,10 @@ items:
   default:topaz_shovel:
     material: golden_shovel
     settings:
-      tags: ["default:topaz_tools"]
+      break_power: 3
+      tags:
+        - default:topaz_tools
+        - minecraft:shovels
     data:
       item_name: <!i><#FF8C00><lang:item.default.topaz_shovel>
       tooltip_style: minecraft:topaz
@@ -80,7 +89,9 @@ items:
   default:topaz_sword:
     material: golden_sword
     settings:
-      tags: ["default:topaz_tools"]
+      tags:
+        - default:topaz_tools
+        - minecraft:swords
     data:
       item_name: <!i><#FF8C00><lang:item.default.topaz_sword>
       tooltip_style: minecraft:topaz
@@ -256,19 +267,6 @@ recipes:
     result:
       id: default:topaz_pickaxe
       count: 1
-  default:topaz_spear:
-    type: shaped
-    category: equipment
-    pattern:
-      - '  A'
-      - ' B '
-      - 'B  '
-    ingredients:
-      A: default:topaz
-      B: minecraft:stick
-    result:
-      id: default:topaz_spear
-      count: 1
   default:topaz_bow:
     type: smithing_transform
     base: minecraft:bow
@@ -301,3 +299,17 @@ recipes:
     result:
       id: default:topaz_trident
       count: 1
+  $$>=1.21.11#topaz_spear:
+    default:topaz_spear:
+      type: shaped
+      category: equipment
+      pattern:
+        - '  A'
+        - ' B '
+        - 'B  '
+      ingredients:
+        A: default:topaz
+        B: minecraft:stick
+      result:
+        id: default:topaz_spear
+        count: 1

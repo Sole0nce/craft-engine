@@ -1,7 +1,7 @@
 package net.momirealms.craftengine.core.world;
 
 import ca.spottedleaf.concurrentutil.collection.MultiThreadedQueue;
-import ca.spottedleaf.concurrentutil.map.ConcurrentLong2ReferenceChainedHashTable;
+import ca.spottedleaf.concurrentutil.map.concurrent.longs.ConcurrentChainedLong2ReferenceHashTable;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
 import net.momirealms.craftengine.core.block.entity.BlockEntity;
@@ -26,7 +26,7 @@ public abstract class CEWorld {
     public static final String REGION_DIRECTORY = "craftengine";
     public final World world;
     public final WorldSettings settings;
-    protected final ConcurrentLong2ReferenceChainedHashTable<CEChunk> loadedChunkMap;
+    protected final ConcurrentChainedLong2ReferenceHashTable<CEChunk> loadedChunkMap;
     protected final WorldDataStorage worldDataStorage;
     protected final WorldHeight worldHeightAccessor;
     protected final MultiThreadedQueue<Collection<SectionPos>> pendingLightSectionBatches = new MultiThreadedQueue<>();
@@ -37,8 +37,10 @@ public abstract class CEWorld {
     protected final List<TickingBlockEntity> pendingAsyncTickingBlockEntities = new ArrayList<>();
     protected volatile boolean isTickingSyncBlockEntities = false;
     protected volatile boolean isTickingAsyncBlockEntities = false;
+    protected final AtomicBoolean asyncTickRunning = new AtomicBoolean(false);
     protected SchedulerTask syncTickTask;
     protected SchedulerTask asyncTickTask;
+    protected boolean ticking;
 
     public CEWorld(World world, StorageAdaptor adaptor) {
         this(world, adaptor.adapt(world));
@@ -46,7 +48,7 @@ public abstract class CEWorld {
 
     public CEWorld(World world, WorldDataStorage dataStorage) {
         this.world = world;
-        this.loadedChunkMap = ConcurrentLong2ReferenceChainedHashTable.createWithCapacity(1024, 0.5f);
+        this.loadedChunkMap = ConcurrentChainedLong2ReferenceHashTable.createWithCapacity(1024, 0.5f);
         this.worldDataStorage = dataStorage;
         this.worldHeightAccessor = world.worldHeight();
         WorldSettings worldSettings;
@@ -64,8 +66,15 @@ public abstract class CEWorld {
             if (this.syncTickTask == null || this.syncTickTask.cancelled())
                 this.syncTickTask = CraftEngine.instance().scheduler().platform().runRepeating(this::syncTick, 1, 1);
             if (this.asyncTickTask == null || this.asyncTickTask.cancelled())
-                this.asyncTickTask = CraftEngine.instance().scheduler().platform().runRepeating(() -> {
-                    CraftEngine.instance().scheduler().async().execute(this::asyncTick);
+                this.asyncTickTask = CraftEngine.instance().scheduler().platform().runAsyncRepeating(() -> {
+                    // 上一轮 asyncTick 还没跑完就跳过本轮，避免并发重入
+                    if (this.asyncTickRunning.compareAndSet(false, true)) {
+                        try {
+                            this.asyncTick();
+                        } finally {
+                            this.asyncTickRunning.set(false);
+                        }
+                    }
                 }, 1, 1);
         } else {
             if (this.syncTickTask != null && !this.syncTickTask.cancelled())
@@ -73,6 +82,11 @@ public abstract class CEWorld {
             if (this.asyncTickTask != null && !this.asyncTickTask.cancelled())
                 this.asyncTickTask.cancel();
         }
+        this.ticking = ticking;
+    }
+
+    public boolean isTicking() {
+        return this.ticking;
     }
 
     public String name() {
@@ -85,7 +99,7 @@ public abstract class CEWorld {
 
     public void saveChunks() {
         try {
-            for (ConcurrentLong2ReferenceChainedHashTable.TableEntry<CEChunk> entry : this.loadedChunkMap.entrySet()) {
+            for (ConcurrentChainedLong2ReferenceHashTable.TableEntry<CEChunk> entry : this.loadedChunkMap.entrySet()) {
                 CEChunk chunk = entry.getValue();
                 if (chunk.isUnsaved()) {
                     this.worldDataStorage.writeChunkAt(new ChunkPos(entry.getKey()), chunk);

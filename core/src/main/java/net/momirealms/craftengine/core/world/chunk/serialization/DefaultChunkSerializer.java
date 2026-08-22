@@ -18,7 +18,7 @@ public final class DefaultChunkSerializer {
         ListTag sections = new ListTag();
         CESection[] ceSections = chunk.sections();
         for (CESection ceSection : ceSections) {
-            if (ceSection != null) {
+            if (ceSection != null && !ceSection.isEmpty()) {
                 CompoundTag sectionNbt = DefaultSectionSerializer.serialize(ceSection);
                 if (sectionNbt != null) {
                     sections.add(sectionNbt);
@@ -47,7 +47,7 @@ public final class DefaultChunkSerializer {
             CompoundTag sectionTag = sections.getCompound(i);
             CESection ceSection = DefaultSectionSerializer.deserialize(sectionTag);
             if (ceSection != null) {
-                int sectionIndex = world.worldHeight().getSectionIndexFromSectionY(ceSection.sectionY());
+                int sectionIndex = world.worldHeight().getSectionIndexFromSectionY(ceSection.sectionY);
                 if (sectionIndex >= 0 && sectionIndex < sectionArray.length) {
                     sectionArray[sectionIndex] = ceSection;
                 }

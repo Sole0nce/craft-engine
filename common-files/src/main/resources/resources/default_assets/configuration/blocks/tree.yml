@@ -154,10 +154,7 @@ config_factory#basic:
             state:
               model:
                 path: ${asset_path_prefix}${tree_type}_planks
-                generation:
-                  parent: minecraft:block/cube_all
-                  textures:
-                    all: ${asset_path_prefix}${tree_type}_planks
+                texture: ${asset_path_prefix}${tree_type}_planks
               auto_state: solid
       ${namespace}:${tree_type}_sapling:
         category: ${namespace}:${tree_type}_tree
@@ -752,3 +749,16 @@ configured_feature:
         hanging_leaves_chance: 0.8
         hanging_leaves_extension_chance: 0.4
       decorators: []
+      $$>=26.2:
+        below_trunk_provider:
+          type: 'minecraft:rule_based_state_provider'
+          rules:
+            - if_true:
+                type: 'minecraft:not'
+                predicate:
+                  type: 'minecraft:matching_block_tag'
+                  tag: 'minecraft:cannot_replace_below_tree_trunk'
+              then:
+                type: 'minecraft:simple_state_provider'
+                state:
+                  Name: 'minecraft:dirt'

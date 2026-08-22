@@ -1,13 +1,10 @@
 package net.momirealms.craftengine.bukkit.util;
 
-import io.papermc.paper.entity.Shearable;
-import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.item.BukkitItemManager;
 import net.momirealms.craftengine.bukkit.item.behavior.BlockItemBehavior;
 import net.momirealms.craftengine.bukkit.item.behavior.FlintAndSteelItemBehavior;
 import net.momirealms.craftengine.bukkit.item.recipe.BukkitRecipeManager;
 import net.momirealms.craftengine.bukkit.world.BukkitExistingBlock;
-import net.momirealms.craftengine.bukkit.world.BukkitWorld;
 import net.momirealms.craftengine.core.block.BlockKeys;
 import net.momirealms.craftengine.core.entity.EntityTypeKeys;
 import net.momirealms.craftengine.core.entity.player.InteractionHand;
@@ -24,17 +21,17 @@ import net.momirealms.craftengine.core.util.*;
 import net.momirealms.craftengine.core.world.BlockHitResult;
 import net.momirealms.craftengine.core.world.BlockPos;
 import net.momirealms.craftengine.core.world.context.BlockPlaceContext;
+import net.momirealms.craftengine.proxy.bukkit.craftbukkit.entity.CraftEntityProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.InteractionHandProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.entity.ShearableProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.BlockItemProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.ItemStackProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.context.BlockPlaceContextProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.block.BlockProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.block.state.BlockBehaviourProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.phys.BlockHitResultProxy;
+import org.bukkit.*;
 import org.bukkit.DyeColor;
-import org.bukkit.GameMode;
-import org.bukkit.Registry;
-import org.bukkit.World;
 import org.bukkit.attribute.Attribute;
 import org.bukkit.attribute.AttributeInstance;
 import org.bukkit.block.Block;
@@ -203,8 +200,7 @@ public final class InteractUtils {
                         && redstoneWire.getFace(BlockFace.WEST).equals(RedstoneWire.Connection.NONE);
                 if (isCross || isDot) {
                     BlockPos blockPos = result.blockPos();
-                    BukkitWorld bukkitWorld = BukkitAdaptor.adapt(player.getWorld());
-                    World world = bukkitWorld.platformWorld();
+                    World world = player.getWorld();
 
                     Direction[] directions = {Direction.EAST, Direction.WEST, Direction.SOUTH, Direction.NORTH};
                     for (Direction direction : directions) {
@@ -791,10 +787,9 @@ public final class InteractUtils {
             Key id = item.vanillaId();
             return ItemKeys.WATER_BUCKET.equals(id) || item.hasVanillaTag(FROG_FOOD);
         });
-
         registerEntityInteraction(EntityTypeKeys.SHEEP, (player, entity, item) -> {
             Key id = item.vanillaId();
-            if (entity instanceof Sheep sheep && sheep.readyToBeSheared() && ArrayUtils.contains(ItemKeys.DYES, item)) {
+            if (entity instanceof Sheep sheep && ShearableProxy.INSTANCE.readyForShearing(CraftEntityProxy.INSTANCE.getEntity(entity)) && ArrayUtils.contains(ItemKeys.DYES, item)) {
                 DyeColor sheepColor = sheep.getColor();
                 if (sheepColor != null) {
                     String color = sheepColor.name().toLowerCase(Locale.ROOT);
@@ -1051,7 +1046,11 @@ public final class InteractUtils {
     }
 
     private static boolean isPetOwner(Player player, Entity entity) {
-        return entity instanceof Tameable tameable && tameable.isTamed() && player.getUniqueId().equals(tameable.getOwnerUniqueId());
+        if (VersionHelper.hasPaperPatch) {
+            return entity instanceof Tameable tameable && tameable.isTamed() && player.getUniqueId().equals(tameable.getOwnerUniqueId());
+        } else {
+            return entity instanceof Tameable tameable && tameable.isTamed() && tameable.getOwner() instanceof OfflinePlayer offlinePlayer && offlinePlayer.getUniqueId().equals(player.getUniqueId());
+        }
     }
 
     // 判断单座位实体是否载有乘客
@@ -1065,7 +1064,8 @@ public final class InteractUtils {
 
     private static boolean canBeSheared(Entity entity, Item item) {
         Key id = item.vanillaId();
-        return entity instanceof Shearable shearable && shearable.readyToBeSheared() && ItemKeys.SHEARS.equals(id);
+        Object serverEntity = CraftEntityProxy.INSTANCE.getEntity(entity);
+        return ShearableProxy.CLASS.isInstance(serverEntity) && ShearableProxy.INSTANCE.readyForShearing(serverEntity) && ItemKeys.SHEARS.equals(id);
     }
 
     public static boolean canPlaceBlock(BlockPlaceContext context) {
@@ -1088,7 +1088,7 @@ public final class InteractUtils {
     public static Object toNMSBlockPlaceContext(BlockPlaceContext context) {
         return BlockPlaceContextProxy.INSTANCE.newInstance(
                 context.getLevel().minecraftWorld(),
-                Optional.ofNullable(context.getPlayer()).map(net.momirealms.craftengine.core.entity.player.Player::serverPlayer).orElse(null),
+                Optional.ofNullable(context.getPlayer()).map(net.momirealms.craftengine.core.entity.player.Player::minecraftPlayer).orElse(null),
                 context.getHand() == InteractionHand.MAIN_HAND ? InteractionHandProxy.MAIN_HAND : InteractionHandProxy.OFF_HAND,
                 context.getItem().minecraftItem(),
                 toNMSHitResult(context.getHitResult())

@@ -11,6 +11,7 @@ import net.momirealms.craftengine.core.entity.furniture.hitbox.FurnitureHitBoxCo
 import net.momirealms.craftengine.core.entity.furniture.hitbox.FurnitureHitboxPart;
 import net.momirealms.craftengine.core.entity.seat.SeatConfig;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.util.Direction;
 import net.momirealms.craftengine.core.util.MiscUtils;
@@ -22,7 +23,7 @@ import net.momirealms.craftengine.core.world.collision.AABB;
 import net.momirealms.craftengine.proxy.minecraft.core.DirectionProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundAddEntityPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundSetEntityDataPacketProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypeProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypesProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.phys.AABBProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.phys.Vec3Proxy;
 import org.joml.Quaternionf;
@@ -83,7 +84,7 @@ public final class ShulkerFurnitureHitboxConfig extends AbstractFurnitureHitBoxC
                 if (interactionEntity) {
                     packets.accept(ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
                             entityIds[2], UUID.randomUUID(), x + offset.x, y + offset.y - 0.005f, z - offset.z, 0, yaw,
-                            EntityTypeProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
+                            EntityTypesProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
                     ));
                     packets.accept(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(entityIds[2], List.copyOf(cachedInteractionValues)));
                     Vec3d vec3d = new Vec3d(x + offset.x, y + offset.y, z - offset.z);
@@ -101,7 +102,7 @@ public final class ShulkerFurnitureHitboxConfig extends AbstractFurnitureHitBoxC
                 if (interactionEntity) {
                     packets.accept(ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
                             entityIds[2], UUID.randomUUID(), x + offset.x, y + offset.y - 0.005f - shulkerHeight + scale, z - offset.z, 0, yaw,
-                            EntityTypeProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
+                            EntityTypesProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
                     ));
                     packets.accept(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(entityIds[2], List.copyOf(cachedInteractionValues)));
                     Vec3d vec3d = new Vec3d(x + offset.x, y + offset.y - shulkerHeight + scale, z - offset.z);
@@ -122,14 +123,14 @@ public final class ShulkerFurnitureHitboxConfig extends AbstractFurnitureHitBoxC
                     // first interaction
                     packets.accept(ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
                             entityIds[2], UUID.randomUUID(), x + offset.x, y + offset.y - 0.005f, z - offset.z, 0, yaw,
-                            EntityTypeProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
+                            EntityTypesProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
                     ));
                     packets.accept(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(entityIds[2], List.copyOf(cachedInteractionValues)));
                     // second interaction
                     double distance = shulkerHeight - scale;
                     packets.accept(ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
                             entityIds[3], UUID.randomUUID(), x + offset.x + shulkerDirection.stepX() * distance, y + offset.y - 0.005f, z - offset.z + shulkerDirection.stepZ() * distance, 0, yaw,
-                            EntityTypeProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
+                            EntityTypesProxy.INTERACTION, 0, Vec3Proxy.ZERO, 0
                     ));
                     packets.accept(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(entityIds[3], List.copyOf(cachedInteractionValues)));
                     Vec3d vec3d1 = new Vec3d(x + offset.x, y + offset.y, z - offset.z);
@@ -303,10 +304,10 @@ public final class ShulkerFurnitureHitboxConfig extends AbstractFurnitureHitBoxC
     }
 
     private static class Factory implements FurnitureHitBoxConfigFactory<ShulkerFurnitureHitbox> {
-        private static final String[] CAN_USE_ITEM_ON = new String[] {"can_use_item_on", "can-use-item-on"};
-        private static final String[] BLOCKS_BUILDING = new String[] {"blocks_building", "blocks-building"};
-        private static final String[] CAN_BE_HIT_BY_PROJECTILE = new String[] {"can_be_hit_by_projectile", "can-be-hit-by-projectile"};
-        private static final String[] INTERACTION_ENTITY = new String[] {"interaction_entity", "interaction-entity"};
+        private static final String[] CAN_USE_ITEM_ON = ConfigKeys.of("can_use_item_on");
+        private static final String[] BLOCKS_BUILDING = ConfigKeys.of("blocks_building");
+        private static final String[] CAN_BE_HIT_BY_PROJECTILE = ConfigKeys.of("can_be_hit_by_projectile");
+        private static final String[] INTERACTION_ENTITY = ConfigKeys.of("interaction_entity");
 
         @Override
         public ShulkerFurnitureHitboxConfig create(ConfigSection section) {

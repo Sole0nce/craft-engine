@@ -4,6 +4,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.plugin.config.ConfigValue;
 import org.joml.AxisAngle4f;
@@ -19,8 +20,8 @@ import java.util.Map;
  * @param matrix 一个不可变的列表，其中包含16个浮点数元素，描述一个行主序（Row-major）矩阵
  */
 public record Transformation(List<Float> matrix) {
-    private static final String[] RIGHT_ROTATION = new String[]{"right_rotation", "right-rotation"};
-    private static final String[] LEFT_ROTATION = new String[]{"left_rotation", "left-rotation"};
+    private static final String[] RIGHT_ROTATION = ConfigKeys.of("right_rotation");
+    private static final String[] LEFT_ROTATION = ConfigKeys.of("left_rotation");
 
     public Transformation(Vector3f translation, Quaternionf leftRotation, Vector3f scale, Quaternionf rightRotation) {
         this(toMatrix(translation, leftRotation, scale, rightRotation));
@@ -28,6 +29,21 @@ public record Transformation(List<Float> matrix) {
 
     public static Transformation fromConfig(ConfigValue value) {
         if (value.is(List.class)) {
+            List<Object> rawList = value.getAsList();
+            if (rawList.size() == 4 && rawList.getFirst() instanceof String) {
+                List<Float> matrix = new java.util.ArrayList<>(16);
+                for (int i = 0; i < 4; i++) {
+                    String row = rawList.get(i).toString().replace("_", "");
+                    String[] parts = row.split(",");
+                    if (parts.length != 4) {
+                        throw new IllegalArgumentException("Each row of transformation matrix must have exactly 4 values, got " + parts.length + " in row " + i);
+                    }
+                    for (String part : parts) {
+                        matrix.add(Float.parseFloat(part.trim()));
+                    }
+                }
+                return new Transformation(Collections.unmodifiableList(matrix));
+            }
             return new Transformation(Collections.unmodifiableList(value.getAsFixedSizeList(16, ConfigValue::getAsFloat)));
         }
         ConfigSection section = value.getAsSection();
@@ -40,7 +56,24 @@ public record Transformation(List<Float> matrix) {
 
     public static Transformation fromJson(JsonElement json) {
         if (json.isJsonArray()) {
-            List<Float> list = json.getAsJsonArray().asList().stream().map(JsonElement::getAsFloat).toList();
+            JsonArray jsonArray = json.getAsJsonArray();
+            if (!jsonArray.isEmpty() && jsonArray.get(0).isJsonArray()) {
+                if (jsonArray.size() != 4) {
+                    throw new IllegalArgumentException("Invalid transformation matrix: expected 4 rows, got " + jsonArray.size());
+                }
+                List<Float> matrix = new java.util.ArrayList<>(16);
+                for (int i = 0; i < 4; i++) {
+                    JsonArray row = jsonArray.get(i).getAsJsonArray();
+                    if (row.size() != 4) {
+                        throw new IllegalArgumentException("Invalid transformation matrix: each row must have 4 values, row " + i + " has " + row.size());
+                    }
+                    for (int j = 0; j < 4; j++) {
+                        matrix.add(row.get(j).getAsFloat());
+                    }
+                }
+                return new Transformation(matrix);
+            }
+            List<Float> list = jsonArray.asList().stream().map(JsonElement::getAsFloat).toList();
             if (list.size() != 16) throw new IllegalArgumentException("Invalid transformation matrix");
             return new Transformation(list);
         }

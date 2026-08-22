@@ -1,5 +1,6 @@
 package net.momirealms.craftengine.bukkit.item.recipe;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import io.papermc.paper.potion.PotionMix;
@@ -55,6 +56,7 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         it.put(RecipeSerializers.SHAPED, recipe -> FastNMS.INSTANCE.createShapedRecipe((CustomShapedRecipe) recipe));
         it.put(RecipeSerializers.SHAPED_TRANSFORM, recipe -> FastNMS.INSTANCE.createShapedRecipe((CustomShapedTransformRecipe) recipe));
         it.put(RecipeSerializers.SHAPELESS, recipe -> FastNMS.INSTANCE.createShapelessRecipe((CustomShapelessRecipe) recipe));
+        it.put(RecipeSerializers.SHAPELESS_TRANSFORM, recipe -> FastNMS.INSTANCE.createShapelessRecipe((CustomShapelessRecipe) recipe));
         it.put(RecipeSerializers.SMELTING, recipe -> FastNMS.INSTANCE.createSmeltingRecipe((CustomSmeltingRecipe) recipe));
         it.put(RecipeSerializers.BLASTING, recipe -> FastNMS.INSTANCE.createBlastingRecipe((CustomBlastingRecipe) recipe));
         it.put(RecipeSerializers.SMOKING, recipe -> FastNMS.INSTANCE.createSmokingRecipe((CustomSmokingRecipe) recipe));
@@ -71,11 +73,12 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         for (UniqueKey holder : ingredient.items()) {
             Optional<? extends BuildableItem> buildableItem = BukkitItemManager.instance().getBuildableItem(holder.key());
             if (buildableItem.isPresent()) {
-                itemStacks.add(buildableItem.get().buildItem(ItemBuildContext.empty(), ingredient.count()).minecraftItem());
+                Item item = buildableItem.get().buildItem(ItemBuildContext.empty(), ingredient.count());
+                itemStacks.add(ingredient.applyPredicateLooks(item).minecraftItem());
             } else {
-                Item barrier = BukkitItemManager.instance().createWrappedItem(ItemKeys.BARRIER, null);
+                Item barrier = Item.byId(ItemKeys.BARRIER);
                 assert barrier != null;
-                barrier.customNameJson(AdventureHelper.componentToJson(Component.text(holder.key().asString()).color(NamedTextColor.RED)));
+                barrier.customNameJson(AdventureHelper.componentToJsonElement(Component.text(holder.key().asString()).color(NamedTextColor.RED)));
                 itemStacks.add(barrier.minecraftItem());
             }
         }
@@ -85,6 +88,7 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
     private final BukkitCraftEngine plugin;
     private final RecipeEventListener recipeEventListener;
     private final CrafterEventListener crafterEventListener;
+    private final PaperRecipeEventListener paperRecipeEventListener;
     // 需要在主线程卸载的配方
     private final List<Key> nativeRecipesToUnregister = new ArrayList<>();
     private final List<Key> brewingRecipesToUnregister = new ArrayList<>();
@@ -93,6 +97,10 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
     // 换成的数据包配方
     private Map<Key, JsonObject> lastDatapackRecipes = Map.of();
     private Object lastRecipeManager = null;
+    // 进入服务器时自动解锁全部配方的缓存
+    private List<NamespacedKey> cachedAllRecipeKeys;
+    // 进入服务器时自动解锁指定配方的缓存（全局 list 与单配方 unlock_on_join 合并）
+    private List<NamespacedKey> cachedUnlockOnJoinKeys;
 
     public BukkitRecipeManager(BukkitCraftEngine plugin) {
         super(createRecipeRegistry(), plugin);
@@ -100,6 +108,7 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         this.plugin = plugin;
         this.recipeEventListener = new RecipeEventListener(plugin, this, plugin.itemManager());
         this.crafterEventListener = VersionHelper.isOrAbove1_21 ? new CrafterEventListener(plugin, this, plugin.itemManager()) : null;
+        this.paperRecipeEventListener = VersionHelper.hasPaperPatch ? new PaperRecipeEventListener() : null;
     }
 
     public static RecipeRegistry createRecipeRegistry() {
@@ -125,9 +134,8 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
     @Override
     public void delayedInit() {
         Bukkit.getPluginManager().registerEvents(this.recipeEventListener, this.plugin.javaPlugin());
-        if (this.crafterEventListener != null) {
-            Bukkit.getPluginManager().registerEvents(this.crafterEventListener, this.plugin.javaPlugin());
-        }
+        if (this.crafterEventListener != null) Bukkit.getPluginManager().registerEvents(this.crafterEventListener, this.plugin.javaPlugin());
+        if (this.paperRecipeEventListener != null) Bukkit.getPluginManager().registerEvents(this.paperRecipeEventListener, this.plugin.javaPlugin());
     }
 
     @Override
@@ -140,6 +148,8 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         if (!Config.enableRecipeSystem()) return;
         // 安排卸载任务，这些任务会在load后执行。如果没有load说明服务器已经关闭了，那就不需要管卸载了。
         if (!this.plugin.isStopping()) {
+            this.cachedAllRecipeKeys = null;
+            this.cachedUnlockOnJoinKeys = null;
             for (Recipe recipe : this.nativeRecipes) {
                 Key id = recipe.id();
                 // 不要卸载数据包配方，只记录自定义的配方
@@ -231,7 +241,7 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
             RecipeManagerProxy.INSTANCE.finalizeRecipeLoading(manager, RecipeManagerProxy.INSTANCE.getEnabledFlags(manager));
         }
         // 1.21.6以下直接发包
-        if (!VersionHelper.isOrAbove1_21_6 || VersionHelper.isFolia) {
+        if (!VersionHelper.isOrAbove1_21_6 || VersionHelper.hasFoliaPatch) {
             PlayerListProxy.INSTANCE.reloadRecipeData(CraftServerProxy.INSTANCE.getPlayerList(Bukkit.getServer()));
         }
 
@@ -245,7 +255,7 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         if (!Config.enableRecipeSystem()) return;
 
         // 处理酿造配方
-        if (VersionHelper.isOrAbove1_20_2) {
+        if (VersionHelper.isOrAbove1_20_2 && VersionHelper.hasPaperPatch) {
             PotionBrewer potionBrewer = Bukkit.getPotionBrewer();
             if (!this.brewingRecipesToUnregister.isEmpty()) {
                 for (Key potion : this.brewingRecipesToUnregister) {
@@ -272,9 +282,9 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         }
 
         // 重载资源
-        if (VersionHelper.isOrAbove1_21_6 && !VersionHelper.isFolia) {
+        if (VersionHelper.isOrAbove1_21_6 && !VersionHelper.hasFoliaPatch) {
             for (BukkitServerPlayer player : this.plugin.networkManager().onlineUsers()) {
-                Object serverPlayer = player.serverPlayer();
+                Object serverPlayer = player.minecraftPlayer();
                 Object advancements = ServerPlayerProxy.INSTANCE.getAdvancements(serverPlayer);
                 if (advancements != null) {
                     PlayerAdvancementsProxy.INSTANCE.save(advancements);
@@ -288,6 +298,7 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
     public void disable() {
         unload();
         HandlerList.unregisterAll(this.recipeEventListener);
+        if (this.paperRecipeEventListener != null) HandlerList.unregisterAll(this.paperRecipeEventListener);
     }
 
     @Override
@@ -326,11 +337,53 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
                 }
                 Recipe recipe = serializer.readJson(id, jsonObject);
                 markAsDataPackRecipe(id);
-                registerRecipeInternal(recipe, false);
+                registerRecipeInternal(recipe, false, false);
             } catch (Throwable e) {
                 this.plugin.logger().warn("Failed to load data pack recipe " + id + ". Json: " + jsonObject, e);
             }
         }
+    }
+
+    public boolean shouldUnlockRecipesOnJoin() {
+        return Config.unlockAllRecipesOnJoin()
+                || !Config.unlockRecipesOnJoinList().isEmpty()
+                || !this.unlockOnJoinRecipes.isEmpty();
+    }
+
+    public void unlockRecipesOnJoin(org.bukkit.entity.Player player) {
+        List<NamespacedKey> keys;
+        if (Config.unlockAllRecipesOnJoin()) {
+            keys = getAllRecipeKeys();
+        } else {
+            keys = getUnlockOnJoinKeys();
+        }
+        if (!keys.isEmpty()) {
+            player.discoverRecipes(keys);
+        }
+    }
+
+    private List<NamespacedKey> getUnlockOnJoinKeys() {
+        if (this.cachedUnlockOnJoinKeys == null) {
+            LinkedHashSet<Key> merged = new LinkedHashSet<>(Config.unlockRecipesOnJoinList());
+            merged.addAll(this.unlockOnJoinRecipes);
+            List<NamespacedKey> keys = new ArrayList<>(merged.size());
+            for (Key key : merged) {
+                keys.add(KeyUtils.toNamespacedKey(key));
+            }
+            this.cachedUnlockOnJoinKeys = keys;
+        }
+        return this.cachedUnlockOnJoinKeys;
+    }
+
+    private List<NamespacedKey> getAllRecipeKeys() {
+        if (this.cachedAllRecipeKeys == null) {
+            List<NamespacedKey> keys = new ArrayList<>(super.byId.size());
+            for (Key key : super.byId.keySet()) {
+                keys.add(KeyUtils.toNamespacedKey(key));
+            }
+            this.cachedAllRecipeKeys = keys;
+        }
+        return this.cachedAllRecipeKeys;
     }
 
     private Map<Key, JsonObject> scanResources() {
@@ -346,25 +399,22 @@ public final class BukkitRecipeManager extends AbstractRecipeManager {
         try (AutoCloseable resourceManager = (AutoCloseable) MultiPackResourceManagerProxy.INSTANCE.newInstance(PackTypeProxy.SERVER_DATA, packResources)) {
             Map<Object, Object> scannedResources = FileToIdConverterProxy.INSTANCE.listMatchingResources(fileToIdConverter, resourceManager);
             for (Map.Entry<Object, Object> entry : scannedResources.entrySet()) {
-                Key id = extractKeyFromIdentifier(entry.getKey().toString());
+                Key id = KeyUtils.identifierToKey(FileToIdConverterProxy.INSTANCE.fileToId(fileToIdConverter, entry.getKey()));
                 try (Reader reader = ResourceProxy.INSTANCE.openAsReader(entry.getValue())) {
-                    JsonObject jsonObject = JsonParser.parseReader(reader).getAsJsonObject();
-                    recipes.put(id, jsonObject);
+                    JsonElement jsonElement = JsonParser.parseReader(reader);
+                    if (!jsonElement.isJsonObject()) {
+                        this.plugin.logger().warn("Couldn't parse recipe file '" + id + "' from '" + entry.getKey() + "': not a JSON object");
+                        continue;
+                    }
+                    recipes.put(id, jsonElement.getAsJsonObject());
+                } catch (Throwable e) {
+                    this.plugin.logger().warn("Couldn't parse recipe file '" + id + "' from '" + entry.getKey() + "'", e);
                 }
             }
         } catch (Throwable e) {
             this.plugin.logger().warn("Unknown error occurred when loading data pack recipes", e);
         }
         return recipes;
-    }
-
-    private Key extractKeyFromIdentifier(String input) {
-        int prefixEndIndex = input.indexOf(':');
-        String prefix = input.substring(0, prefixEndIndex);
-        int lastSlashIndex = input.lastIndexOf('/');
-        int lastDotIndex = input.lastIndexOf('.');
-        String fileName = input.substring(lastSlashIndex + 1, lastDotIndex);
-        return Key.of(prefix, fileName);
     }
 
     public static void injectFurnaceBlockEntity(Object blockEntity) {

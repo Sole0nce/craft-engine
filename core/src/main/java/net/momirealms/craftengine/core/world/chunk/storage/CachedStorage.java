@@ -1,9 +1,6 @@
 package net.momirealms.craftengine.core.world.chunk.storage;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.Scheduler;
-import net.momirealms.craftengine.core.plugin.CraftEngine;
+import net.momirealms.craftengine.core.util.ExpiringLong2ObjectCache;
 import net.momirealms.craftengine.core.world.CEWorld;
 import net.momirealms.craftengine.core.world.ChunkPos;
 import net.momirealms.craftengine.core.world.WorldSettings;
@@ -18,16 +15,11 @@ import java.util.concurrent.TimeUnit;
 
 public final class CachedStorage<T extends WorldDataStorage> implements WorldDataStorage {
     private final T storage;
-    private final Cache<ChunkPos, CEChunk> chunkCache;
+    private final ExpiringLong2ObjectCache<CEChunk> chunkCache;
 
     public CachedStorage(T storage) {
         this.storage = storage;
-        this.chunkCache = Caffeine.newBuilder()
-                .executor(CraftEngine.instance().scheduler().async())
-                .scheduler(Scheduler.systemScheduler())
-                .initialCapacity(4096)
-                .expireAfterAccess(60, TimeUnit.SECONDS)
-                .build();
+        this.chunkCache = new ExpiringLong2ObjectCache<>(30, TimeUnit.SECONDS, 4096);
     }
 
     @Override
@@ -47,13 +39,20 @@ public final class CachedStorage<T extends WorldDataStorage> implements WorldDat
 
     @Override
     public @NotNull CEChunk readChunkAt(@NotNull CEWorld world, @NotNull ChunkPos pos, @Nullable Chunk chunkAccess) throws IOException {
-        CEChunk chunk = this.chunkCache.getIfPresent(pos);
+        CEChunk chunk = this.chunkCache.getIfPresent(pos.longKey);
         if (chunk != null) {
             return chunk;
         }
         chunk = this.storage.readChunkAt(world, pos, chunkAccess);
-        this.chunkCache.put(pos, chunk);
+        this.chunkCache.put(pos.longKey, chunk);
         return chunk;
+    }
+
+    @Override
+    public void preloadChunkAt(@NotNull CEWorld world, @NotNull ChunkPos pos, @Nullable Chunk chunkAccess) throws IOException {
+        if (this.chunkCache.getIfPresent(pos.longKey) == null) {
+            this.chunkCache.put(pos.longKey, this.storage.readChunkAt(world, pos, chunkAccess));
+        }
     }
 
     @Override
@@ -73,7 +72,7 @@ public final class CachedStorage<T extends WorldDataStorage> implements WorldDat
 
     @Override
     public void clearChunkAt(@NotNull ChunkPos pos) throws IOException {
-        this.chunkCache.invalidate(pos);
+        this.chunkCache.invalidate(pos.longKey);
         this.storage.clearChunkAt(pos);
     }
 

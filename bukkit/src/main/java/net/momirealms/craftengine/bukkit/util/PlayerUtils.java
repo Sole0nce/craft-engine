@@ -22,7 +22,7 @@ import net.momirealms.craftengine.proxy.minecraft.server.level.ServerPlayerProxy
 import net.momirealms.craftengine.proxy.minecraft.sounds.SoundEventProxy;
 import net.momirealms.craftengine.proxy.minecraft.sounds.SoundSourceProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypeProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypesProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.entity.EquipmentSlotProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.entity.item.ItemEntityProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.entity.player.InventoryProxy;
@@ -53,7 +53,7 @@ public final class PlayerUtils {
     }
 
     public static void giveItem(@NotNull Player player, Item original, Item item, boolean spawnFakeEntity) {
-        Object serverPlayer = player.serverPlayer();
+        Object serverPlayer = player.minecraftPlayer();
         Object inventory = PlayerProxy.INSTANCE.getInventory(serverPlayer);
         boolean flag = InventoryProxy.INSTANCE.add(inventory, item.minecraftItem());
         if (flag && item.isEmpty()) {
@@ -69,7 +69,7 @@ public final class PlayerUtils {
                 float randomAngle = RandomUtils.generateRandomFloat() * ((float) Math.PI * 2F);
                 float spreadIntensity = 0.02F * RandomUtils.generateRandomFloat();
 
-                int entityId = EntityProxy.ENTITY_COUNTER.incrementAndGet();
+                int entityId = EntityUtils.ENTITY_COUNTER.incrementAndGet();
 
                 double velX = (-sinYaw * cosPitch * 0.3F) + Math.cos(randomAngle) * (double) spreadIntensity;
                 double velY = -sinPitch * 0.3F + 0.1F + (RandomUtils.generateRandomFloat() - RandomUtils.generateRandomFloat()) * 0.1F;
@@ -79,11 +79,11 @@ public final class PlayerUtils {
                         entityId,
                         UUID.randomUUID(),
                         player.x(),
-                        EntityProxy.INSTANCE.getEyeY(player.serverPlayer()) - 0.3,
+                        EntityProxy.INSTANCE.getEyeY(player.minecraftPlayer()) - 0.3,
                         player.z(),
                         player.xRot(),
                         player.yRot(),
-                        EntityTypeProxy.ITEM,
+                        EntityTypesProxy.ITEM,
                         0,
                         Vec3Proxy.INSTANCE.newInstance(velX, velY, velZ),
                         0
@@ -103,7 +103,7 @@ public final class PlayerUtils {
             AbstractContainerMenuProxy.INSTANCE.broadcastChanges(PlayerProxy.INSTANCE.getContainerMenu(serverPlayer));
         } else {
             Object droppedItem;
-            if (VersionHelper.isOrAbove1_21_4) {
+            if (VersionHelper.isOrAbove1_21_4 && VersionHelper.hasPaperPatch) {
                 droppedItem = ServerPlayerProxy.INSTANCE.drop(serverPlayer, item.minecraftItem(), false, false, !VersionHelper.isOrAbove1_21_5, null);
             } else if (VersionHelper.isOrAbove1_20_3) {
                 droppedItem = ServerPlayerProxy.INSTANCE.drop$1(serverPlayer, item.minecraftItem(), false, false, true);
@@ -136,7 +136,7 @@ public final class PlayerUtils {
         packets.add(ClientboundSetEquipmentPacketProxy.INSTANCE.newInstance(
                 player.entityId(), List.of(Pair.of(EquipmentSlotProxy.OFFHAND, totemItem))
         ));
-        packets.add(ClientboundEntityEventPacketProxy.INSTANCE.newInstance(player.serverPlayer(), (byte) 35));
+        packets.add(ClientboundEntityEventPacketProxy.INSTANCE.newInstance(player.minecraftPlayer(), (byte) 35));
         if (isMainHandTotem) {
             packets.add(ClientboundSetEquipmentPacketProxy.INSTANCE.newInstance(
                     player.entityId(), List.of(Pair.of(EquipmentSlotProxy.MAINHAND, previousMainHandItem.minecraftItem()))

@@ -2,12 +2,8 @@ package net.momirealms.craftengine.bukkit.block.behavior;
 
 import net.momirealms.antigrieflib.Flag;
 import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
-import net.momirealms.craftengine.bukkit.item.BukkitItemManager;
 import net.momirealms.craftengine.bukkit.plugin.BukkitCraftEngine;
-import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
-import net.momirealms.craftengine.bukkit.util.DirectionUtils;
-import net.momirealms.craftengine.bukkit.util.InteractUtils;
-import net.momirealms.craftengine.bukkit.util.LocationUtils;
+import net.momirealms.craftengine.bukkit.util.*;
 import net.momirealms.craftengine.core.block.BlockDefinition;
 import net.momirealms.craftengine.core.block.BlockStateWrapper;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
@@ -19,6 +15,7 @@ import net.momirealms.craftengine.core.entity.player.InteractionResult;
 import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.item.ItemKeys;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.sound.SoundData;
 import net.momirealms.craftengine.core.util.Direction;
@@ -213,7 +210,7 @@ public final class FenceGateBlockBehavior extends BukkitBlockBehavior implements
                 LevelWriterProxy.INSTANCE.setBlock(level, abovePos, BlocksProxy.AIR$defaultState, UpdateFlags.UPDATE_ALL);
                 world.dropItemNaturally(
                         new Vec3d(Vec3iProxy.INSTANCE.getX(abovePos) + 0.5, Vec3iProxy.INSTANCE.getY(abovePos) + 0.5, Vec3iProxy.INSTANCE.getZ(abovePos) + 0.5),
-                        BukkitItemManager.instance().createWrappedItem(ItemKeys.REDSTONE, null)
+                        Item.byId(ItemKeys.REDSTONE)
                 );
                 if (BlockGetterProxy.INSTANCE.getBlockState(level, blockPos) != blockPos) {
                     return;
@@ -223,7 +220,9 @@ public final class FenceGateBlockBehavior extends BukkitBlockBehavior implements
 
         if (changed) {
             customState = customState.with(this.openProperty, hasSignal);
-            LevelProxy.INSTANCE.getWorld(level).sendGameEvent(null,
+            LevelUtils.sendGameEvent(
+                    LevelProxy.INSTANCE.getWorld(level),
+                    null,
                     hasSignal ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE,
                     new Vector(Vec3iProxy.INSTANCE.getX(blockPos), Vec3iProxy.INSTANCE.getY(blockPos), Vec3iProxy.INSTANCE.getZ(blockPos))
             );
@@ -249,7 +248,8 @@ public final class FenceGateBlockBehavior extends BukkitBlockBehavior implements
         }
         LevelWriterProxy.INSTANCE.setBlock(world.minecraftWorld(), LocationUtils.toBlockPos(pos), newState.customBlockState().minecraftState(), UpdateFlags.UPDATE_ALL);
         boolean open = isOpen(newState);
-        ((org.bukkit.World) world.platformWorld()).sendGameEvent(
+        LevelUtils.sendGameEvent(
+                (org.bukkit.World) world.platformWorld(),
                 player != null ? (org.bukkit.entity.Player) player.platformPlayer() : null,
                 open ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE,
                 new Vector(pos.x(), pos.y(), pos.z())
@@ -280,8 +280,8 @@ public final class FenceGateBlockBehavior extends BukkitBlockBehavior implements
     }
 
     private static class Factory implements BlockBehaviorFactory<FenceGateBlockBehavior> {
-        private static final String[] CAN_OPEN_WITH_HAND = new String[] {"can_open_with_hand", "can-open-with-hand"};
-        private static final String[] CAN_OPEN_BY_WIND_CHARGE = new String[] {"can_open_by_wind_charge", "can-open-by-wind-charge"};
+        private static final String[] CAN_OPEN_WITH_HAND = ConfigKeys.of("can_open_with_hand");
+        private static final String[] CAN_OPEN_BY_WIND_CHARGE = ConfigKeys.of("can_open_by_wind_charge");
 
         @Override
         public FenceGateBlockBehavior create(BlockDefinition block, ConfigSection section) {

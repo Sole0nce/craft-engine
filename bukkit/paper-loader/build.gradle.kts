@@ -23,17 +23,19 @@ dependencies {
     nbt(project)
 
     implementation(project(":core"))
-    implementation(project(":bukkit"))
+    implementation(project(":bukkit")) {
+        exclude(group = "net.momirealms", module = "antigrieflib")
+    }
     implementation(project(":bukkit:legacy"))
     implementation(project(":bukkit:compatibility"))
     implementation(project(":bukkit:compatibility:legacy"))
     implementation(project(":common-files"))
 
-    // concurrentutil
-    implementation(files("${rootProject.rootDir}/libs/concurrentutil-${rootProject.properties["concurrent_util_version"]}.jar"))
+    // leafpile
+    implementation(files("${rootProject.rootDir}/libs/leafpile-${rootProject.properties["leafpile_version"]}.jar"))
 
+    implementation("net.momirealms:sparrow-minimessage:${rootProject.properties["sparrow_minimessage_version"]}")
     implementation("net.momirealms:sparrow-util:${rootProject.properties["sparrow_util_version"]}")
-    implementation("net.momirealms:antigrieflib:${rootProject.properties["anti_grief_version"]}")
     implementation("net.momirealms:craft-engine-nms-helper-mojmap:${rootProject.properties["nms_helper_version"]}")
     implementation("cn.gtemc:itembridge:${rootProject.properties["itembridge_version"]}")
     implementation("cn.gtemc:levelerbridge:${rootProject.properties["levelerbridge_version"]}")
@@ -63,10 +65,20 @@ paper {
         }
 
         register("PlaceholderAPI") { required = false }
-        register("Skript") { required = false }
+        register("Skript") {
+            required = false
+            load = PaperPluginDescription.RelativeLoadOrder.AFTER
+        }
+        register("Denizen") {
+            required = false
+            load = PaperPluginDescription.RelativeLoadOrder.AFTER
+        }
         register("LuckPerms") { required = false }
         register("ViaVersion") { required = false }
+        register("Vault") { required = false }
+        register("AxiomPaper") { required = false }
         register("QuickShop-Hikari") { required = false }
+        register("CoreProtect") { required = false }
 
         // PacketEvents
         register("GrimAC") { required = false }
@@ -163,6 +175,8 @@ paper {
         register("hClaims") { required = false }
         register("Factions") { required = false }
         register("NoBuildPlus") { required = false }
+        register("SimpleClaimSystem") { required = false }
+        register("LandClaimPlugin") { required = false }
     }
 }
 
@@ -184,6 +198,7 @@ tasks {
 
 listOf(
     "26.1.2",
+    "26.2"
 ).forEach {
     registerPaperTask(it, javaVersion = 25)
 }

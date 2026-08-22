@@ -1,17 +1,14 @@
 package net.momirealms.craftengine.bukkit.block.behavior;
 
-import io.papermc.paper.event.entity.EntityInsideBlockEvent;
 import net.momirealms.antigrieflib.Flag;
+import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.plugin.BukkitCraftEngine;
-import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
-import net.momirealms.craftengine.bukkit.util.DirectionUtils;
-import net.momirealms.craftengine.bukkit.util.EventUtils;
-import net.momirealms.craftengine.bukkit.util.LocationUtils;
-import net.momirealms.craftengine.bukkit.world.BukkitWorldManager;
+import net.momirealms.craftengine.bukkit.util.*;
 import net.momirealms.craftengine.core.block.BlockDefinition;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
 import net.momirealms.craftengine.core.block.behavior.BlockBehaviorFactory;
 import net.momirealms.craftengine.core.block.property.Property;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.sound.SoundData;
 import net.momirealms.craftengine.core.util.Direction;
@@ -102,13 +99,13 @@ public final class PressurePlateBlockBehavior extends BukkitBlockBehavior {
     }
 
     @Override
-    @SuppressWarnings("UnstableApiUsage")
     public void entityInside(Object thisBlock, Object[] args) {
         Entity entity = EntityProxy.INSTANCE.getBukkitEntity(args[3]);
         Block block = CraftBlockProxy.INSTANCE.at(args[1], args[2]);
-        EntityInsideBlockEvent event = new EntityInsideBlockEvent(entity, block);
-        if (EventUtils.fireAndCheckCancel(event)) {
-            return;
+        if (VersionHelper.hasPaperPatch) {
+            if (EventUtils.fireAndCheckCancel(PaperEventUtils.entityInside(entity, block))) {
+                return;
+            }
         }
         boolean cannotInteract = entity instanceof Player p && !BukkitCraftEngine.instance().antiGriefProvider().test(p, Flag.USE_PRESSURE_PLATE, block.getLocation());
         if (cannotInteract) {
@@ -169,9 +166,10 @@ public final class PressurePlateBlockBehavior extends BukkitBlockBehavior {
     }
 
     private void handleDeactivation(Object entity, org.bukkit.World craftWorld, Object pos, Vector positionVector) {
-        World world = BukkitWorldManager.instance().getWorld(craftWorld).world();
+        World world = BukkitAdaptor.adapt(craftWorld);
         world.playBlockSound(LocationUtils.toVec3d(LocationUtils.fromBlockPos(pos)), this.offSound);
-        craftWorld.sendGameEvent(
+        LevelUtils.sendGameEvent(
+                craftWorld,
                 entity != null ? EntityProxy.INSTANCE.getBukkitEntity(entity) : null,
                 GameEvent.BLOCK_DEACTIVATE,
                 positionVector
@@ -179,9 +177,10 @@ public final class PressurePlateBlockBehavior extends BukkitBlockBehavior {
     }
 
     private void handleActivation(Object entity, org.bukkit.World craftWorld, Object pos, Vector positionVector) {
-        World world = BukkitWorldManager.instance().getWorld(craftWorld).world();
+        World world = BukkitAdaptor.adapt(craftWorld);
         world.playBlockSound(LocationUtils.toVec3d(LocationUtils.fromBlockPos(pos)), this.onSound);
-        craftWorld.sendGameEvent(
+        LevelUtils.sendGameEvent(
+                craftWorld,
                 entity != null ? EntityProxy.INSTANCE.getBukkitEntity(entity) : null,
                 GameEvent.BLOCK_ACTIVATE,
                 positionVector
@@ -236,7 +235,7 @@ public final class PressurePlateBlockBehavior extends BukkitBlockBehavior {
     }
 
     private static class Factory implements BlockBehaviorFactory<PressurePlateBlockBehavior> {
-        private static final String[] PRESSED_TIME = new String[] {"pressed_time", "pressed-time"};
+        private static final String[] PRESSED_TIME = ConfigKeys.of("pressed_time");
 
         @Override
         public PressurePlateBlockBehavior create(BlockDefinition block, ConfigSection section) {

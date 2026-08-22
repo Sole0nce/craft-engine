@@ -43,4 +43,10 @@ public interface PlayerProxy extends LivingEntityProxy {
 
     @MethodInvoker(name = "getCooldowns")
     Object getCooldowns(Object target);
+
+    @MethodInvoker(name = "getXpNeededForNextLevel")
+    int getXpNeededForNextLevel(Object target);
+
+    @MethodInvoker(name = "getAttackStrengthScale")
+    float getAttackStrengthScale(Object target, float adjustTicks);
 }

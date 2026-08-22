@@ -2,7 +2,6 @@ package net.momirealms.craftengine.bukkit.entity.furniture.element;
 
 import net.momirealms.craftengine.bukkit.entity.data.BaseEntityData;
 import net.momirealms.craftengine.bukkit.entity.data.decoration.ArmorStandData;
-import net.momirealms.craftengine.bukkit.item.BukkitItemManager;
 import net.momirealms.craftengine.core.entity.furniture.Furniture;
 import net.momirealms.craftengine.core.entity.furniture.element.FurnitureElementConfig;
 import net.momirealms.craftengine.core.entity.furniture.element.FurnitureElementConfigFactory;
@@ -15,6 +14,7 @@ import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.item.ItemKeys;
 import net.momirealms.craftengine.core.item.component.DataComponentKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.plugin.context.CommonConditions;
 import net.momirealms.craftengine.core.plugin.context.Condition;
@@ -26,7 +26,6 @@ import net.momirealms.craftengine.core.world.Vec3d;
 import net.momirealms.craftengine.core.world.WorldPosition;
 import org.jetbrains.annotations.NotNull;
 import org.joml.Vector3f;
-import org.jspecify.annotations.NonNull;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -83,11 +82,11 @@ public final class ArmorStandFurnitureElementConfig implements FurnitureElementC
     }
 
     public Item item(Player player, FurnitureTintSource tintSource) {
-        Item wrappedItem = BukkitItemManager.instance().createWrappedItem(this.itemId, player);
+        Item wrappedItem = Item.byId(this.itemId, player);
         if (tintSource != null && wrappedItem != null) {
             tintSource.applyTint(wrappedItem);
         }
-        return Optional.ofNullable(wrappedItem).orElseGet(() -> BukkitItemManager.instance().createWrappedItem(ItemKeys.BARRIER, null));
+        return Optional.ofNullable(wrappedItem).orElseGet(() -> Item.byId(ItemKeys.BARRIER));
     }
 
     public FurnitureTintSource createTintSource(@NotNull Furniture furniture) {
@@ -100,13 +99,13 @@ public final class ArmorStandFurnitureElementConfig implements FurnitureElementC
     }
 
     @Override
-    public ArmorStandFurnitureElement create(@NotNull Furniture furniture, @NonNull ArmorStandFurnitureElement previous) {
+    public ArmorStandFurnitureElement create(@NotNull Furniture furniture, @NotNull ArmorStandFurnitureElement previous) {
         WorldPosition pos = getPos(furniture);
         return new ArmorStandFurnitureElement(furniture, this, pos, previous.entityId, !pos.equals(previous.position));
     }
 
     @Override
-    public ArmorStandFurnitureElement createExact(@NotNull Furniture furniture, @NonNull ArmorStandFurnitureElement previous) {
+    public ArmorStandFurnitureElement createExact(@NotNull Furniture furniture, @NotNull ArmorStandFurnitureElement previous) {
         WorldPosition pos = getPos(furniture);
         if (!pos.equals(previous.position)) {
             return null;
@@ -126,13 +125,13 @@ public final class ArmorStandFurnitureElementConfig implements FurnitureElementC
     }
 
     private static class Factory implements FurnitureElementConfigFactory<ArmorStandFurnitureElement> {
-        private static final String[] APPLY_DYED_COLOR = new String[]{"apply_dyed_color", "apply-dyed-color"};
-        private static final String[] GLOW_COLOR = new String[]{"glow_color", "glow-color"};
-        private static final String[] TINT_SOURCE = new String[]{"tint_source", "tint-source"};
+        private static final String[] APPLY_DYED_COLOR = ConfigKeys.of("apply_dyed_color");
+        private static final String[] GLOW_COLOR = ConfigKeys.of("glow_color");
+        private static final String[] TINT_SOURCE = ConfigKeys.of("tint_source");
 
         @Override
         public ArmorStandFurnitureElementConfig create(ConfigSection section) {
-            List<Condition<PlayerContext>> conditions = section.getSectionList("conditions", CommonConditions::fromConfig);
+            List<Condition<PlayerContext>> conditions = section.getSectionList(ConfigKeys.of("condition(s)"), CommonConditions::fromConfig);
             boolean legacyTintSource = section.getBoolean(APPLY_DYED_COLOR, false);
             return new ArmorStandFurnitureElementConfig(
                     section.getNonNullIdentifier("item"),

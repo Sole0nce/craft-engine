@@ -3,6 +3,7 @@ package net.momirealms.craftengine.bukkit.plugin.command.debug;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.event.ClickEvent;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.plugin.command.BukkitCommandFeature;
 import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
 import net.momirealms.craftengine.bukkit.util.LocationUtils;
@@ -27,6 +28,7 @@ import net.momirealms.craftengine.proxy.minecraft.tags.TagKeyProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.block.state.BlockBehaviourProxy;
 import org.bukkit.Location;
 import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.incendo.cloud.Command;
@@ -57,8 +59,9 @@ public final class DebugTargetBlockCommand extends BukkitCommandFeature<CommandS
                         block = player.getTargetBlockExact(10);
                         if (block == null) return;
                     }
-                    String bData = block.getBlockData().getAsString();
-                    Object blockState = BlockStateUtils.blockDataToBlockState(block.getBlockData());
+                    BlockData blockData = block.getBlockData();
+                    String bData = blockData.getAsString();
+                    Object blockState = BlockStateUtils.blockDataToBlockState(blockData);
                     Sender sender = plugin().senderFactory().wrap(context.sender());
                     sender.sendMessage(Component.text("minecraft state: " + bData)
                             .hoverEvent(Component.text("Copy", NamedTextColor.YELLOW))
@@ -75,9 +78,9 @@ public final class DebugTargetBlockCommand extends BukkitCommandFeature<CommandS
                         sender.sendMessage(Component.text("visual state: " + immutableBlockState.visualBlockState().getAsString())
                                 .hoverEvent(Component.text("Copy", NamedTextColor.YELLOW))
                                 .clickEvent(ClickEvent.suggestCommand(immutableBlockState.visualBlockState().getAsString())));
-                        sender.sendMessage(Component.text("name: ").append(Component.translatable(block.translationKey())
+                        sender.sendMessage(Component.text("name: ").append(Component.translatable(BlockStateUtils.getDescriptionId(blockState))
                                 .hoverEvent(Component.text("Copy", NamedTextColor.YELLOW))
-                                .clickEvent(ClickEvent.suggestCommand(block.translationKey()))));
+                                .clickEvent(ClickEvent.suggestCommand(BlockStateUtils.getDescriptionId(blockState)))));
                         List<BlockBehavior> behaviors = new ArrayList<>();
                         immutableBlockState.behavior().let(BlockBehavior.class, behaviors::add);
                         if (!behaviors.isEmpty()) {
@@ -89,14 +92,14 @@ public final class DebugTargetBlockCommand extends BukkitCommandFeature<CommandS
                                         .clickEvent(ClickEvent.suggestCommand(name)));
                             }
                         }
-                        CEWorld world = plugin().worldManager().getWorld(block.getWorld().getUID());
+                        CEWorld world = BukkitAdaptor.adapt(block.getWorld()).storageWorld();
                         BlockPos blockPos = LocationUtils.toBlockPos(block.getLocation());
                         BlockEntity blockEntity = world.getBlockEntityAtIfLoaded(blockPos);
                         if (blockEntity != null) {
                             boolean valid = blockEntity.isValid();
                             sender.sendMessage(Component.text("block entity:"));
                             sender.sendMessage(Component.text("  isValid: " + valid));
-                            BlockEntityRenderer renderer = blockEntity.renderer();
+                            BlockEntityRenderer renderer = blockEntity.dynamicRenderer();
                             if (renderer != null) {
                                 BlockEntityElement[] elements = renderer.elements();
                                 if (elements.length > 0) {
@@ -135,7 +138,7 @@ public final class DebugTargetBlockCommand extends BukkitCommandFeature<CommandS
                                         .clickEvent(ClickEvent.suggestCommand(stringTag)));
                             }
                         }
-                        CEWorld world = plugin().worldManager().getWorld(block.getWorld().getUID());
+                        CEWorld world = BukkitAdaptor.adapt(block.getWorld()).storageWorld();
                         BlockPos blockPos = LocationUtils.toBlockPos(block.getLocation());
                         ImmutableBlockState dataInCache = world.getBlockStateAtIfLoaded(blockPos);
                         sender.sendMessage(Component.text("storage: " + (dataInCache != null && !dataInCache.isEmpty())));

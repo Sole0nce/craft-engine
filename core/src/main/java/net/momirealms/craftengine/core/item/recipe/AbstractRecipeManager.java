@@ -6,10 +6,7 @@ import net.momirealms.craftengine.core.item.recipe.input.RecipeInput;
 import net.momirealms.craftengine.core.item.recipe.result.CustomRecipeResult;
 import net.momirealms.craftengine.core.pack.Pack;
 import net.momirealms.craftengine.core.plugin.CraftEngine;
-import net.momirealms.craftengine.core.plugin.config.Config;
-import net.momirealms.craftengine.core.plugin.config.ConfigParser;
-import net.momirealms.craftengine.core.plugin.config.ConfigSection;
-import net.momirealms.craftengine.core.plugin.config.IdSectionConfigParser;
+import net.momirealms.craftengine.core.plugin.config.*;
 import net.momirealms.craftengine.core.plugin.config.lifecycle.LoadingStage;
 import net.momirealms.craftengine.core.plugin.config.lifecycle.LoadingStages;
 import net.momirealms.craftengine.core.util.Key;
@@ -32,6 +29,7 @@ public abstract class AbstractRecipeManager implements RecipeManager {
     protected final List<Recipe> nativeRecipes = new ArrayList<>();
     protected final List<CustomBrewingRecipe> brewingRecipes = new ArrayList<>();
     protected final Set<Key> dataPackRecipes = new HashSet<>();
+    protected final Set<Key> unlockOnJoinRecipes = new HashSet<>();
     protected final ConfigParser recipeParser;
     protected final RecipeRegistry recipeRegistry;
 
@@ -56,6 +54,7 @@ public abstract class AbstractRecipeManager implements RecipeManager {
         this.ingredientUnlockable.clear();
         this.nativeRecipes.clear();
         this.brewingRecipes.clear();
+        this.unlockOnJoinRecipes.clear();
     }
 
     protected void markAsDataPackRecipe(Key key) {
@@ -123,7 +122,7 @@ public abstract class AbstractRecipeManager implements RecipeManager {
 
     protected abstract void loadDataPackRecipes();
 
-    protected synchronized void registerRecipeInternal(Recipe recipe, boolean unlockOnIngredientObtained) {
+    protected synchronized void registerRecipeInternal(Recipe recipe, boolean unlockOnIngredientObtained, boolean unlockOnJoin) {
         // 原版配方被覆写了
         if (this.byId.containsKey(recipe.id())) return;
         this.byType.computeIfAbsent(recipe.type(), k -> new ArrayList<>()).add(recipe);
@@ -165,12 +164,20 @@ public abstract class AbstractRecipeManager implements RecipeManager {
                 this.ingredientUnlockable.computeIfAbsent(usedKey.key(), l -> new ArrayList<>()).add(unlockable);
             }
         }
+        if (unlockOnJoin) {
+            this.unlockOnJoinRecipes.add(recipe.id());
+        }
     }
 
     private final class RecipeParser extends IdSectionConfigParser {
-        public static final String[] CONFIG_SECTION_NAME = new String[] {"recipes", "recipe"};
+        public static final String[] CONFIG_SECTION_NAME = ConfigKeys.of("recipe(s)");
         private final AtomicInteger count = new AtomicInteger(0);
         private static final Key DYES = Key.of("dyes");
+
+        @Override
+        public Key type() {
+            return Key.ce("recipe");
+        }
 
         @Override
         public String[] sectionId() {
@@ -255,18 +262,16 @@ public abstract class AbstractRecipeManager implements RecipeManager {
                                         List.of(IngredientElement.item(itemId)),
                                         Set.of(UniqueKey.create(itemId)),
                                         Set.of(UniqueKey.create(itemDefinition.material())),
-                                        !itemDefinition.isVanillaItem(),
-                                        1
+                                        !itemDefinition.isVanillaItem()
                                 ),
                                 Ingredient.of(
                                         List.of(IngredientElement.tag(DYES)),
                                         itemIds,
                                         minecraftItemIds,
-                                        hasCustomItem,
-                                        1
+                                        hasCustomItem
                                 ),
                                 null, null, false, false
-                        ), Config.unlockOnIngredientObtained());
+                        ), Config.unlockOnIngredientObtained(), false);
                     }
                 }
             }
@@ -277,14 +282,14 @@ public abstract class AbstractRecipeManager implements RecipeManager {
             return List.of(LoadingStages.ITEM);
         }
 
-        private static final String[] UNLOCK_ON_INGREDIENT_OBTAINED = new String[] {"unlock_on_ingredient_obtained", "unlock-on-ingredient-obtained"};
+        private static final String[] UNLOCK_ON_INGREDIENT_OBTAINED = ConfigKeys.of("unlock_on_ingredient_obtained");
+        private static final String[] UNLOCK_ON_JOIN = ConfigKeys.of("unlock_on_join");
 
         @Override
         public void parseSection(@NotNull Pack pack, @NotNull Path path, @NotNull Key id, @NotNull ConfigSection section) {
             if (!Config.enableRecipeSystem()) return;
-            boolean unlockOnIngredientObtained = section.getBoolean(UNLOCK_ON_INGREDIENT_OBTAINED, Config.unlockOnIngredientObtained());
             Recipe recipe = RecipeSerializers.fromConfig(id, section);
-            registerRecipeInternal(recipe, unlockOnIngredientObtained);
+            registerRecipeInternal(recipe, section.getBoolean(UNLOCK_ON_INGREDIENT_OBTAINED, Config.unlockOnIngredientObtained()), section.getBoolean(UNLOCK_ON_JOIN, false));
             this.count.incrementAndGet();
         }
     }

@@ -29,16 +29,22 @@ public interface ItemManager extends Manageable, ModelGenerator {
 
     Collection<Key> vanillaItems();
 
+    @Deprecated
     @Nullable
     Item createCustomWrappedItem(Key id, @Nullable Player player);
 
+    @Deprecated
     @Nullable
     Item createWrappedItem(Key id, @Nullable Player player);
 
     @NotNull
     Item wrap(Object itemStack);
 
-    Item fromBytes(byte[] bytes);
+    default Item fromBytes(byte[] bytes) {
+        return fromBytes(bytes, true);
+    }
+
+    Item fromBytes(byte[] bytes, boolean useCache);
 
     Item fromNBT(CompoundTag tag);
 

@@ -38,6 +38,9 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
     @FieldGetter(name = "OPTIONAL_STREAM_CODEC", isStatic = true, activeIf = "min_version=1.20.5")
     Object getOptionalStreamCodec();
 
+    @FieldGetter(name = "OPTIONAL_UNTRUSTED_STREAM_CODEC", isStatic = true, activeIf = "min_version=1.21.5")
+    Object getOptionalUntrustedStreamCodec();
+
     @MethodInvoker(name = "hurtAndBreak", activeIf = "min_version=1.20.5")
     void hurtAndBreak(Object target, int amount, @Type(clazz = LivingEntityProxy.class) Object entity, @Type(clazz = EquipmentSlotProxy.class) Object slot);
 
@@ -53,7 +56,7 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
     @MethodInvoker(name = "setCount")
     void setCount(Object target, int count);
 
-    @MethodInvoker(name = "getBukkitStack")
+    @MethodInvoker(name = "getBukkitStack", activeIf = "has_patch=paper")
     ItemStack getBukkitStack(Object target);
 
     @MethodInvoker(name = "copyWithCount")
@@ -130,4 +133,7 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
 
     @MethodInvoker(name = "isSameItemSameComponents", isStatic = true, activeIf = "min_version=1.20.5")
     boolean isSameItemSameComponents(@Type(clazz = ItemStackProxy.class) Object stack, @Type(clazz = ItemStackProxy.class) Object otherStack);
+
+    @MethodInvoker(name = "isValidRepairItem", activeIf = "min_version=1.21.2")
+    boolean isValidRepairItem(Object target, @Type(clazz = ItemStackProxy.class) Object repairItem);
 }

@@ -3,10 +3,11 @@ package net.momirealms.craftengine.bukkit.block;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import net.momirealms.craftengine.bukkit.block.behavior.*;
-import net.momirealms.craftengine.bukkit.nms.FastNMS;
+import net.momirealms.craftengine.bukkit.block.listener.BlockEventListener;
 import net.momirealms.craftengine.bukkit.plugin.BukkitCraftEngine;
 import net.momirealms.craftengine.bukkit.plugin.injector.BlockGenerator;
 import net.momirealms.craftengine.bukkit.plugin.injector.MaterialInjector;
+import net.momirealms.craftengine.bukkit.plugin.injector.StatePredicateGenerator;
 import net.momirealms.craftengine.bukkit.util.*;
 import net.momirealms.craftengine.core.block.*;
 import net.momirealms.craftengine.core.block.behavior.BlockBehavior;
@@ -58,8 +59,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class BukkitBlockManager extends AbstractBlockManager {
     public static final Set<Object> CLIENT_SIDE_NOTE_BLOCKS = new HashSet<>(2048, 0.6f);
-    private static final Object ALWAYS_FALSE = FastNMS.INSTANCE.createAlwaysStatePredicate(false);
-    private static final Object ALWAYS_TRUE = FastNMS.INSTANCE.createAlwaysStatePredicate(true);
+    private static final Object ALWAYS_FALSE = StatePredicateGenerator.alwaysFalse();
+    private static final Object ALWAYS_TRUE = StatePredicateGenerator.alwaysTrue();
     private static BukkitBlockManager instance;
     private final BukkitCraftEngine plugin;
     // 事件监听器
@@ -72,8 +73,8 @@ public final class BukkitBlockManager extends AbstractBlockManager {
     private Map<Object, Integer> igniteOdds;
     private Map<Object, Integer> burnOdds;
     // 自定义客户端侧原版方块标签
-    private Map<Integer, List<Key>> clientBoundTags = Map.of();
-    private Map<Integer, List<Key>> previousClientBoundTags = Map.of();
+    private Map<Integer, Collection<Key>> clientBoundTags = Map.of();
+    private Map<Integer, Collection<Key>> previousClientBoundTags = Map.of();
     // 缓存的原版方块tag包
     private List<TagUtils.TagEntry> cachedUpdateTags = List.of();
     // 被移除声音的原版方块
@@ -103,6 +104,7 @@ public final class BukkitBlockManager extends AbstractBlockManager {
         this.findViewBlockingVanillaBlocks();
         Arrays.fill(this.immutableBlockStates, EmptyBlockDefinition.INSTANCE.defaultState());
         this.registerBlockStatePacketListener(); // 一定要预先初始化一次，预防id超出上限
+        TagUtils.blockTagNesting();
     }
 
     public static BukkitBlockManager instance() {
@@ -208,7 +210,7 @@ public final class BukkitBlockManager extends AbstractBlockManager {
         // if there's no change
         if (this.clientBoundTags.equals(this.previousClientBoundTags)) return;
         List<TagUtils.TagEntry> list = new ArrayList<>();
-        for (Map.Entry<Integer, List<Key>> entry : this.clientBoundTags.entrySet()) {
+        for (Map.Entry<Integer, Collection<Key>> entry : this.clientBoundTags.entrySet()) {
             list.add(new TagUtils.TagEntry(entry.getKey(), entry.getValue()));
         }
         this.cachedUpdateTags = list;
@@ -282,7 +284,12 @@ public final class BukkitBlockManager extends AbstractBlockManager {
             BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setDestroySpeed(nmsState, settings.hardness());
             BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setReplaceable(nmsState, settings.replaceable());
             BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setMapColor(nmsState, MapColorProxy.INSTANCE.byId(settings.mapColor().id));
-            BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setInstrument(nmsState, NoteBlockInstrumentProxy.VALUES[settings.instrument().ordinal()]);
+            try {
+                BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setInstrument(nmsState, NoteBlockInstrumentProxy.INSTANCE.valueOf(settings.instrument().toUpperCase(Locale.ROOT)));
+            } catch (IllegalArgumentException e) {
+                this.plugin.logger().warn("Invalid note block instrument '" + settings.instrument() + "'", e);
+                BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setInstrument(nmsState, NoteBlockInstrumentProxy.HARP);
+            }
             BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setPushReaction(nmsState, PushReactionProxy.VALUES[settings.pushReaction().ordinal()]);
             boolean canOcclude = settings.canOcclude() == Tristate.UNDEFINED ? BlockStateUtils.isOcclude(nmsVisualState) : settings.canOcclude().asBoolean();
             BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.setCanOcclude(nmsState, canOcclude);
@@ -305,10 +312,12 @@ public final class BukkitBlockManager extends AbstractBlockManager {
             shapeHolder.bindValue(new BukkitBlockShape(nmsVisualState, Optional.ofNullable(state.settings().supportShapeBlockState()).map(it -> Objects.requireNonNull(createVanillaBlockState(it), "Illegal block state: " + it).minecraftState()).orElse(null)));
             ObjectHolder<BlockBehavior> behaviorHolder = nmsBlock.behaviorDelegate();
             behaviorHolder.bindValue(state.behavior());
-            if (VersionHelper.isOrAbove1_21_2) {
-                BlockBehaviourProxy.INSTANCE.setDescriptionId(nmsBlock, block.translationKey());
-            } else {
-                BlockProxy.INSTANCE.setDescriptionId(nmsBlock, block.translationKey());
+            if (VersionHelper.hasPaperPatch) {
+                if (VersionHelper.isOrAbove1_21_2) {
+                    BlockBehaviourProxy.INSTANCE.setDescriptionId(nmsBlock, block.translationKey());
+                } else {
+                    BlockProxy.INSTANCE.setDescriptionId(nmsBlock, block.translationKey());
+                }
             }
 
             BlockBehaviourProxy.INSTANCE.setExplosionResistance(nmsBlock, settings.resistance());
@@ -316,6 +325,9 @@ public final class BukkitBlockManager extends AbstractBlockManager {
             BlockBehaviourProxy.INSTANCE.setSpeedFactor(nmsBlock, settings.speedFactor());
             BlockBehaviourProxy.INSTANCE.setJumpFactor(nmsBlock, settings.jumpFactor());
             BlockBehaviourProxy.INSTANCE.setSoundType(nmsBlock, SoundUtils.toNMSSoundType(settings.sounds()));
+            if (VersionHelper.isOrAbove26_2) {
+                BlockBehaviourProxy.INSTANCE.setBounceRestitution(nmsBlock, settings.bounceRestitution());
+            }
 
             BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.initCache(nmsState);
             boolean isConditionallyFullOpaque = canOcclude & useShapeForLightOcclusion;
@@ -348,7 +360,7 @@ public final class BukkitBlockManager extends AbstractBlockManager {
 
             Object holder = BukkitCraftEngine.instance().blockManager().getMinecraftBlockHolder(state.customBlockState().registryId());
             Set<Object> tags = new HashSet<>();
-            for (Key tag : settings.tags()) {
+            for (Key tag : TagUtils.expandBlockTags(settings.tags())) {
                 tags.add(TagKeyProxy.INSTANCE.create(RegistriesProxy.BLOCK, KeyUtils.toIdentifier(tag)));
             }
             HolderProxy.ReferenceProxy.INSTANCE.setTags(holder, tags);
@@ -408,6 +420,7 @@ public final class BukkitBlockManager extends AbstractBlockManager {
                 HolderProxy.ReferenceProxy.INSTANCE.setTags(blockHolder, Set.of());
                 DelegatingBlockState newBlockState = (DelegatingBlockState) BlockProxy.INSTANCE.getDefaultBlockState(customBlock);
                 this.customBlockStates[i] = newBlockState;
+                BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.initCache(newBlockState);
                 IdMapperProxy.INSTANCE.add(BlockProxy.BLOCK_STATE_REGISTRY, newBlockState);
                 if (injectBukkitMaterial) {
                     newMaterial[length + i] = MaterialInjector.createMaterial(customBlockId, length + i, customBlock);
@@ -468,7 +481,7 @@ public final class BukkitBlockManager extends AbstractBlockManager {
         if (blockId == -1) {
             throw new IllegalStateException("Block " + id + " not found");
         }
-        this.clientBoundTags.put(blockId, tags);
+        this.clientBoundTags.put(blockId, TagUtils.expandBlockTags(tags));
     }
 
     public boolean isPlaceSoundMissing(Object sound) {

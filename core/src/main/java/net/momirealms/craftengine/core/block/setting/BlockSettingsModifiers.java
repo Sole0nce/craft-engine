@@ -1,6 +1,7 @@
 package net.momirealms.craftengine.core.block.setting;
 
 import net.momirealms.craftengine.core.block.BlockSounds;
+import net.momirealms.craftengine.core.block.entity.render.display.DestroyStageDisplayEntitySetting;
 import net.momirealms.craftengine.core.plugin.CraftEngine;
 import net.momirealms.craftengine.core.registry.BuiltInRegistries;
 import net.momirealms.craftengine.core.registry.Registries;
@@ -29,13 +30,18 @@ public final class BlockSettingsModifiers {
         return settings -> settings.luminance(luminance);
     });
     public static final BlockSettingsModifierType<BlockSettingsModifier> MAP_COLOR = register(Key.ce("map_color"), value -> {
-        String stringName = value.getAsString();
-        MapColor mapColor = MapColor.get(stringName);
-        if (mapColor != MapColor.CLEAR) {
-            return settings -> settings.mapColor(mapColor);
+        if (value.is(Number.class)) {
+            int color = value.getAsInt();
+            return settings -> settings.mapColor(MapColor.byId(color));
+        } else {
+            String stringName = value.getAsString();
+            MapColor mapColor = MapColor.byName(stringName);
+            if (mapColor != MapColor.CLEAR) {
+                return settings -> settings.mapColor(mapColor);
+            }
+            Color color = value.getAsColor();
+            return settings -> settings.mapColor(MapColor.byColor(color));
         }
-        int color = value.getAsInt();
-        return settings -> settings.mapColor(MapColor.get(color));
     });
     public static final BlockSettingsModifierType<BlockSettingsModifier> BURN_CHANCE = register(Key.ce("burn_chance"), value -> {
         int burnChance = value.getAsInt();
@@ -114,7 +120,7 @@ public final class BlockSettingsModifiers {
         return settings -> settings.pushReaction(pushReaction);
     });
     public static final BlockSettingsModifierType<BlockSettingsModifier> INSTRUMENT = register(Key.ce("instrument"), value -> {
-        Instrument instrument = value.getAsEnum(Instrument.class);
+        String instrument = value.getAsNonEmptyString();
         return settings -> settings.instrument(instrument);
     });
     public static final BlockSettingsModifierType<BlockSettingsModifier> SOUNDS = register(Key.ce("sounds"), value -> {
@@ -137,6 +143,10 @@ public final class BlockSettingsModifiers {
         boolean respect = value.getAsBoolean();
         return settings -> settings.respectToolComponent(respect);
     });
+    public static final BlockSettingsModifierType<BlockSettingsModifier> REQUIRED_BREAK_POWER = register(Key.ce("required_break_power"), value -> {
+        int power = value.getAsInt();
+        return settings -> settings.requiredBreakPower(power);
+    });
     public static final BlockSettingsModifierType<BlockSettingsModifier> USE_SHAPE_FOR_LIGHT_OCCLUSION = register(Key.ce("use_shape_for_light_occlusion"), value -> {
         boolean use = value.getAsBoolean();
         return settings -> settings.useShapeForLightOcclusion(use);
@@ -154,7 +164,7 @@ public final class BlockSettingsModifiers {
     });
     public static final BlockSettingsModifierType<BlockSettingsModifier> CORRECT_TOOLS = register(Key.ce("correct_tools"), value -> {
         List<String> tools = value.getAsStringList();
-        LazyReference<Set<Key>> correctTools = LazyReference.lazyReference(() -> {
+        LazyReference<Set<Key>> correctTools = LazyReference.untilNotNull(() -> {
             Set<Key> ids = new HashSet<>();
             for (String tool : tools) {
                 if (tool.charAt(0) == '#') ids.addAll(CraftEngine.instance().itemManager().itemIdsByTag(Key.of(tool.substring(1))).stream().map(UniqueKey::key).toList());
@@ -167,6 +177,14 @@ public final class BlockSettingsModifiers {
     public static final BlockSettingsModifierType<BlockSettingsModifier> IS_RAYTRACE_BLOCKING = register(Key.ce("block_raytrace"), value -> {
         boolean block = value.getAsBoolean();
         return settings -> settings.isRaytraceBlocking(block);
+    });
+    public static final BlockSettingsModifierType<BlockSettingsModifier> BOUNCE_RESTITUTION = register(Key.ce("bounce_restitution"), value -> {
+        float bounceRestitution = value.getAsFloat();
+        return settings -> settings.bounceRestitution(bounceRestitution);
+    });
+    public static final BlockSettingsModifierType<BlockSettingsModifier> DESTROY_STAGES = register(Key.ce("destroy_stages"), value -> {
+        DestroyStageDisplayEntitySetting display = DestroyStageDisplayEntitySetting.fromConfig(value.getAsSection());
+        return settings -> settings.destroyStageDisplay(display);
     });
 
     private BlockSettingsModifiers() {}

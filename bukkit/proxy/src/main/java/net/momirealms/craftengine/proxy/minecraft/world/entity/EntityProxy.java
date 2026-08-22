@@ -14,10 +14,24 @@ import java.util.concurrent.atomic.AtomicInteger;
 public interface EntityProxy {
     EntityProxy INSTANCE = ASMProxyFactory.create(EntityProxy.class);
     Class<?> CLASS = SparrowClass.find("net.minecraft.world.entity.Entity");
-    AtomicInteger ENTITY_COUNTER = INSTANCE.getEntityCounter();
 
-    @FieldGetter(name = "ENTITY_COUNTER")
+    @FieldGetter(name = "ENTITY_COUNTER", isStatic = true, activeIf = "max_version=26.1.2")
     AtomicInteger getEntityCounter();
+
+    @FieldGetter(name = "yRot")
+    float getYRot(Object target);
+
+    @FieldGetter(name = "xRot")
+    float getXRot(Object target);
+
+    @MethodInvoker(name = "getX")
+    double getX(Object target);
+
+    @MethodInvoker(name = "getY")
+    double getY(Object target);
+
+    @MethodInvoker(name = "getZ")
+    double getZ(Object target);
 
     @FieldGetter(name = "xo")
     double getXo(Object target);
@@ -58,10 +72,10 @@ public interface EntityProxy {
     @FieldSetter(name = "hurtMarked")
     void setHurtMarked(Object target, boolean hurtMarked);
 
-    @FieldGetter(name = {"trackedEntity", "tracker"})
+    @FieldGetter(name = {"trackedEntity", "tracker"}, activeIf = "has_patch=paper")
     Object getTrackedEntity(Object target);
 
-    @FieldSetter(name = {"trackedEntity", "tracker"})
+    @FieldSetter(name = {"trackedEntity", "tracker"}, activeIf = "has_patch=paper")
     void setTrackedEntity(Object target, Object trackedEntity);
 
     @FieldGetter(name = "wasTouchingWater")
@@ -91,6 +105,9 @@ public interface EntityProxy {
     @FieldGetter(name = "eyeHeight")
     float getEyeHeight(Object target);
 
+    @MethodInvoker(name = "getEyeHeight")
+    float getEyeHeight(Object target, @Type(clazz = PoseProxy.class) Object pose);
+
     @MethodInvoker(name = "getPassengersRidingOffset", activeIf = "max_version=1.20.1")
     double getPassengersRidingOffset(Object target);
 
@@ -99,6 +116,9 @@ public interface EntityProxy {
 
     @MethodInvoker(name = "isSpectator")
     boolean isSpectator(Object target);
+
+    @MethodInvoker(name = "isShiftKeyDown")
+    boolean isShiftKeyDown(Object target);
 
     @MethodInvoker(name = "setDeltaMovement")
     void setDeltaMovement(Object target, double x, double y, double z);
@@ -159,4 +179,16 @@ public interface EntityProxy {
 
     @MethodInvoker(name = "setRot")
     void setRot(Object target, float yRot, float xRot);
+
+    @MethodInvoker(name = "setPose")
+    void setPose(Object target, @Type(clazz = PoseProxy.class) Object pose);
+
+    @MethodInvoker(name = "getEyePosition")
+    Object getEyePosition(Object target);
+
+    @MethodInvoker(name = "getLookAngle")
+    Object getLookAngle(Object target);
+
+    @MethodInvoker(name = "getPose")
+    Object getPose(Object target);
 }

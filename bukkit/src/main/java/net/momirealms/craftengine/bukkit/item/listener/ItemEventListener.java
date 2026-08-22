@@ -1,12 +1,9 @@
 package net.momirealms.craftengine.bukkit.item.listener;
 
-import com.destroystokyo.paper.event.player.PlayerReadyArrowEvent;
-import io.papermc.paper.event.block.CompostItemEvent;
 import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.api.event.AsyncResourcePackGenerateEvent;
 import net.momirealms.craftengine.bukkit.api.event.CustomBlockInteractEvent;
 import net.momirealms.craftengine.bukkit.entity.BukkitEntity;
-import net.momirealms.craftengine.bukkit.entity.BukkitItemEntity;
 import net.momirealms.craftengine.bukkit.entity.projectile.ProjectileItems;
 import net.momirealms.craftengine.bukkit.item.BukkitItem;
 import net.momirealms.craftengine.bukkit.item.BukkitItemDefinition;
@@ -30,6 +27,7 @@ import net.momirealms.craftengine.core.item.behavior.ItemBehavior;
 import net.momirealms.craftengine.core.item.component.DataComponentKeys;
 import net.momirealms.craftengine.core.item.enchantment.EnchantmentKeys;
 import net.momirealms.craftengine.core.item.setting.ItemSettings;
+import net.momirealms.craftengine.core.item.setting.value.DragRepairItem;
 import net.momirealms.craftengine.core.item.setting.value.FoodData;
 import net.momirealms.craftengine.core.item.updater.ItemUpdateResult;
 import net.momirealms.craftengine.core.plugin.config.Config;
@@ -38,14 +36,17 @@ import net.momirealms.craftengine.core.plugin.context.EventTrigger;
 import net.momirealms.craftengine.core.plugin.context.PlayerOptionalContext;
 import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
 import net.momirealms.craftengine.core.plugin.network.mod.protocol.ClientboundCreativeModeTabItemsPacket;
+import net.momirealms.craftengine.core.sound.SoundData;
 import net.momirealms.craftengine.core.sound.SoundSet;
 import net.momirealms.craftengine.core.sound.SoundSource;
 import net.momirealms.craftengine.core.util.*;
 import net.momirealms.craftengine.core.util.random.RandomUtils;
 import net.momirealms.craftengine.core.world.BlockHitResult;
 import net.momirealms.craftengine.core.world.BlockPos;
+import net.momirealms.craftengine.core.world.EntityHitResult;
 import net.momirealms.craftengine.core.world.Vec3d;
 import net.momirealms.craftengine.core.world.context.BlockPlaceContext;
+import net.momirealms.craftengine.core.world.context.InteractEntityContext;
 import net.momirealms.craftengine.core.world.context.UseOnContext;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundContainerSetDataPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ServerboundUseItemOnPacketProxy;
@@ -62,6 +63,7 @@ import net.momirealms.craftengine.proxy.minecraft.world.item.context.UseOnContex
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Openable;
@@ -124,15 +126,43 @@ public final class ItemEventListener implements Listener {
         if (InteractUtils.isEntityInteractable(player, entity, itemInHand)) return;
 
         Cancellable cancellable = Cancellable.of(event::isCancelled, event::setCancelled);
+        BukkitEntity bukkitEntity = new BukkitEntity(entity);
         PlayerOptionalContext context = PlayerOptionalContext.of(serverPlayer, ContextHolder.builder()
                 .withOptionalParameter(DirectContextParameters.ITEM_IN_HAND, itemInHand.isEmpty() ? null : itemInHand)
                 .withParameter(DirectContextParameters.HAND, hand)
                 .withParameter(DirectContextParameters.EVENT, cancellable)
-                .withParameter(DirectContextParameters.ENTITY, new BukkitEntity(entity))
+                .withParameter(DirectContextParameters.ENTITY, bukkitEntity)
                 .withParameter(DirectContextParameters.POSITION, LocationUtils.toWorldPosition(event.getRightClicked().getLocation()))
         );
         ItemDefinition itemDefinition = optionalCustomItem.get();
         itemDefinition.execute(context, EventTrigger.RIGHT_CLICK);
+        if (event.isCancelled()) return;
+
+        Optional<ItemBehavior> optionalItemBehavior = itemInHand.getBehavior();
+        if (optionalItemBehavior.isEmpty()) return;
+
+        Location entityLocation = entity.getLocation();
+        Vec3d hitLocation;
+        if (event instanceof PlayerInteractAtEntityEvent atEvent) {
+            org.bukkit.util.Vector clicked = atEvent.getClickedPosition();
+            hitLocation = new Vec3d(entityLocation.getX() + clicked.getX(), entityLocation.getY() + clicked.getY(), entityLocation.getZ() + clicked.getZ());
+        } else {
+            hitLocation = new Vec3d(entityLocation.getX(), entityLocation.getY() + entity.getHeight() / 2, entityLocation.getZ());
+        }
+        Location eyeLocation = player.getEyeLocation();
+        Direction direction = Direction.getApproximateNearest(
+                eyeLocation.getX() - hitLocation.x,
+                eyeLocation.getY() - hitLocation.y,
+                eyeLocation.getZ() - hitLocation.z
+        );
+        InteractEntityContext interactEntityContext = new InteractEntityContext(serverPlayer, hand, new EntityHitResult(direction, hitLocation), bukkitEntity);
+        InteractionResult useResult = optionalItemBehavior.get().useOnEntity(interactEntityContext);
+        if (useResult.success()) {
+            serverPlayer.updateLastSuccessfulInteractionTick(serverPlayer.gameTicks());
+        }
+        if (useResult == InteractionResult.SUCCESS_AND_CANCEL) {
+            event.setCancelled(true);
+        }
     }
 
     @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
@@ -168,7 +198,7 @@ public final class ItemEventListener implements Listener {
         Object blockState = BlockStateUtils.blockDataToBlockState(blockData);
         ImmutableBlockState immutableBlockState = BlockStateUtils.getOptionalCustomBlockState(blockState).orElse(null);
         Item itemInHand = serverPlayer.getItemInHand(hand);
-        Location interactionPoint = event.getInteractionPoint();
+        Location interactionPoint = EventUtils.getInteractionPoint(event);
 
         BlockHitResult hitResult = null;
         if (action == Action.RIGHT_CLICK_BLOCK && interactionPoint != null) {
@@ -186,7 +216,7 @@ public final class ItemEventListener implements Listener {
             CustomBlockInteractEvent interactEvent = new CustomBlockInteractEvent(
                     player, block.getLocation(), interactionPoint, immutableBlockState,
                     block, event.getBlockFace(), hand,
-                    action.isRightClick() ? CustomBlockInteractEvent.Action.RIGHT_CLICK : CustomBlockInteractEvent.Action.LEFT_CLICK,
+                    action == Action.RIGHT_CLICK_BLOCK ? CustomBlockInteractEvent.Action.RIGHT_CLICK : CustomBlockInteractEvent.Action.LEFT_CLICK,
                     event.getItem(), contextBuilder
             );
             if (EventUtils.fireAndCheckCancel(interactEvent)) {
@@ -195,7 +225,7 @@ public final class ItemEventListener implements Listener {
             }
 
             // fix client side issues
-            if (action.isRightClick() && hitResult != null &&
+            if (action == Action.RIGHT_CLICK_BLOCK && hitResult != null &&
                     InteractUtils.canPlaceVisualBlock(player, BlockStateUtils.fromBlockData(immutableBlockState.visualBlockState().minecraftState()), hitResult, itemInHand)) {
                 player.updateInventory();
             }
@@ -211,7 +241,7 @@ public final class ItemEventListener implements Listener {
                     .withParameter(DirectContextParameters.POSITION, LocationUtils.toWorldPosition(block.getLocation()))
                     .withOptionalParameter(DirectContextParameters.ITEM_IN_HAND, itemInHand.isEmpty() ? null : itemInHand)
             );
-            if (action.isRightClick()) blockDefinition.execute(context, EventTrigger.RIGHT_CLICK);
+            if (action == Action.RIGHT_CLICK_BLOCK) blockDefinition.execute(context, EventTrigger.RIGHT_CLICK);
             else blockDefinition.execute(context, EventTrigger.LEFT_CLICK);
             if (dummy.isCancelled()) {
                 event.setCancelled(true);
@@ -226,10 +256,19 @@ public final class ItemEventListener implements Listener {
             if (hitResult != null) {
                 UseOnContext useOnContext = new UseOnContext(world, serverPlayer, hand, itemInHand, hitResult);
                 boolean hasItem = !serverPlayer.getItemInHand(InteractionHand.MAIN_HAND).isEmpty() || !serverPlayer.getItemInHand(InteractionHand.OFF_HAND).isEmpty();
-                boolean flag = player.isSneaking() && hasItem;
-                if (!flag) {
-                    if (immutableBlockState.behavior() instanceof BlockBehavior behavior) {
-                        InteractionResult result = behavior.useOnBlock(useOnContext, immutableBlockState);
+                BlockBehavior behavior = immutableBlockState.behavior();
+                boolean flag = serverPlayer.isSecondaryUseActive() && hasItem && !behavior.canUseOnBlockIfSecondaryUseActive(useOnContext, immutableBlockState);
+                if (!flag && (VersionHelper.hasPaperPatch && event.useItemInHand() != Event.Result.DENY)) {
+                    InteractionResult result = behavior.useOnBlock(useOnContext, immutableBlockState);
+                    if (result.success()) {
+                        serverPlayer.updateLastSuccessfulInteractionTick(serverPlayer.gameTicks());
+                        if (result == InteractionResult.SUCCESS_AND_CANCEL) {
+                            event.setCancelled(true);
+                        }
+                        return;
+                    }
+                    if (result == InteractionResult.TRY_EMPTY_HAND && hand == InteractionHand.MAIN_HAND) {
+                        result = behavior.useWithoutItem(useOnContext, immutableBlockState);
                         if (result.success()) {
                             serverPlayer.updateLastSuccessfulInteractionTick(serverPlayer.gameTicks());
                             if (result == InteractionResult.SUCCESS_AND_CANCEL) {
@@ -237,19 +276,9 @@ public final class ItemEventListener implements Listener {
                             }
                             return;
                         }
-                        if (result == InteractionResult.TRY_EMPTY_HAND && hand == InteractionHand.MAIN_HAND) {
-                            result = behavior.useWithoutItem(useOnContext, immutableBlockState);
-                            if (result.success()) {
-                                serverPlayer.updateLastSuccessfulInteractionTick(serverPlayer.gameTicks());
-                                if (result == InteractionResult.SUCCESS_AND_CANCEL) {
-                                    event.setCancelled(true);
-                                }
-                                return;
-                            }
-                        }
-                        if (result == InteractionResult.FAIL) {
-                            return;
-                        }
+                    }
+                    if (result == InteractionResult.FAIL) {
+                        return;
                     }
                 }
             }
@@ -267,7 +296,8 @@ public final class ItemEventListener implements Listener {
                                         Vec3d.atCenterOf(hitResult.blockPos()),
                                         openable.isOpen() ? soundSet.closeSound() : soundSet.openSound(),
                                         SoundSource.BLOCK,
-                                        1, RandomUtils.generateRandomFloat(0.9f, 1));
+                                        1, RandomUtils.generateRandomFloat(0.9f, 1)
+                                );
                             }
                         } else if (blockData instanceof Powerable powerable && !powerable.isPowered()) {
                             SoundSet soundSet = SoundSet.getByBlock(blockOwner);
@@ -276,7 +306,8 @@ public final class ItemEventListener implements Listener {
                                         Vec3d.atCenterOf(hitResult.blockPos()),
                                         soundSet.openSound(),
                                         SoundSource.BLOCK,
-                                        1, RandomUtils.generateRandomFloat(0.9f, 1));
+                                        1, RandomUtils.generateRandomFloat(0.9f, 1)
+                                );
                             }
                         }
                     }
@@ -397,7 +428,7 @@ public final class ItemEventListener implements Listener {
             }
 
             // 客户端觉得方块自定义可交互，可实际上未交互。这时候客户端只会发一个主手交互包
-            if (immutableBlockState != null  // 必须是自定义方块才能触发
+            if (VersionHelper.hasPaperPatch && immutableBlockState != null  // 必须是自定义方块才能触发
                     && !serverPlayer.isSecondaryUseActive()  // 没有shift
                     && !canPlaceBlock  // 物品不可放置
                     && InteractUtils.isInteractable(player, BlockStateUtils.fromBlockData(immutableBlockState.visualBlockState().minecraftState()), hitResult, itemInHand)) {
@@ -410,23 +441,37 @@ public final class ItemEventListener implements Listener {
                     try {
                         serverPlayer.setIsSimulatingInteraction(true);
                         // 先尝试 useOn
+                        Object nmsStack = itemInHand.minecraftItem();
+                        boolean infiniteMaterials = serverPlayer.canInstabuild();
+                        int countBefore = ItemStackProxy.INSTANCE.getCount(nmsStack);
                         result = ItemProxy.INSTANCE.useOn(item, UseOnContextProxy.INSTANCE.newInstance(
                                 world.minecraftWorld(),
-                                serverPlayer.serverPlayer(),
+                                serverPlayer.minecraftPlayer(),
                                 hand == InteractionHand.MAIN_HAND ? InteractionHandProxy.MAIN_HAND : InteractionHandProxy.OFF_HAND,
-                                itemInHand.minecraftItem(),
+                                nmsStack,
                                 nmsHitResult
                         ));
+                        if (infiniteMaterials) {
+                            ItemStackProxy.INSTANCE.setCount(nmsStack, countBefore);
+                        }
                         if (result != InteractionResultProxy.INSTANCE.getPass()) {
+                            applyHeldItemTransform(serverPlayer, hand, result);
+                            if (InteractionResultProxy.INSTANCE.consumesAction(result)) {
+                                playSimulatedUseSound(serverPlayer, world, itemInHand, hitResult);
+                            }
                             return;
                         }
                         // 再尝试 use
                         result = ItemProxy.INSTANCE.use(
                                 item,
                                 serverPlayer.world().minecraftWorld(),
-                                serverPlayer.serverPlayer(),
+                                serverPlayer.minecraftPlayer(),
                                 hand == InteractionHand.MAIN_HAND ? InteractionHandProxy.MAIN_HAND : InteractionHandProxy.OFF_HAND
                         );
+                        applyHeldItemTransform(serverPlayer, hand, result);
+                        if (InteractionResultProxy.INSTANCE.consumesAction(result)) {
+                            playSimulatedUseSound(serverPlayer, world, itemInHand, hitResult);
+                        }
                     } finally {
                         serverPlayer.setIsSimulatingInteraction(false);
                     }
@@ -472,6 +517,56 @@ public final class ItemEventListener implements Listener {
         }
     }
 
+    // 模拟执行的 useOn/use 可能就地消耗活体物品堆（如水桶经 ItemUtils.createFilledResult shrink 原堆），
+    // 替换物挂在 InteractionResult.Success#heldItemTransformedTo 上。
+    // 正常流程由 ServerPlayerGameMode 应用该替换，绕过它直接调用 Item 层逻辑时必须自行补回，否则替换物丢失
+    private static void applyHeldItemTransform(BukkitServerPlayer player, InteractionHand hand, Object result) {
+        if (VersionHelper.isOrAbove1_21_2 && InteractionResultProxy.SuccessProxy.CLASS.isInstance(result)) {
+            Object transformed = InteractionResultProxy.SuccessProxy.INSTANCE.heldItemTransformedTo(result);
+            if (transformed != null) {
+                player.setItemInHand(hand, ItemStackUtils.wrap(transformed));
+            }
+        }
+    }
+
+    private void playSimulatedUseSound(BukkitServerPlayer player, BukkitWorld world, Item itemInHand, BlockHitResult hitResult) {
+        Key itemId = itemInHand.vanillaId();
+        BlockPos relative = hitResult.blockPos().relative(hitResult.direction());
+        switch (itemId.value()) {
+            case "water_bucket" -> {
+                if (world.bukkitWorld().getEnvironment() == World.Environment.NETHER) playEvaporationEffects(player, relative);
+                else player.playSound(Vec3d.atCenterOf(relative), Key.of("minecraft:item.bucket.empty"), SoundSource.BLOCK, 1.0F, 1.0F);
+            }
+            case "cod_bucket", "salmon_bucket", "tropical_fish_bucket", "pufferfish_bucket" -> {
+                if (world.bukkitWorld().getEnvironment() == World.Environment.NETHER) playEvaporationEffects(player, relative);
+                else player.playSound(Vec3d.atCenterOf(relative), Key.of("minecraft:item.bucket.empty_fish"), SoundSource.NEUTRAL, 1.0F, 1.0F);
+            }
+            case "axolotl_bucket" -> {
+                if (world.bukkitWorld().getEnvironment() == World.Environment.NETHER) playEvaporationEffects(player, relative);
+                else player.playSound(Vec3d.atCenterOf(relative), Key.of("minecraft:item.bucket.empty_axolotl"), SoundSource.NEUTRAL, 1.0F, 1.0F);
+            }
+            case "tadpole_bucket" -> {
+                if (world.bukkitWorld().getEnvironment() == World.Environment.NETHER) playEvaporationEffects(player, relative);
+                else player.playSound(Vec3d.atCenterOf(relative), Key.of("minecraft:item.bucket.empty_tadpole"), SoundSource.NEUTRAL, 1.0F, 1.0F);
+            }
+            case "lava_bucket" -> player.playSound(Vec3d.atCenterOf(relative), Key.of("minecraft:item.bucket.empty_lava"), SoundSource.BLOCK, 1.0F, 1.0F);
+            default -> {
+            }
+        }
+    }
+
+    private static void playEvaporationEffects(BukkitServerPlayer player, BlockPos pos) {
+        float pitch = 2.6F + (ThreadLocalRandom.current().nextFloat() - ThreadLocalRandom.current().nextFloat()) * 0.8F;
+        player.playSound(Vec3d.atCenterOf(pos), Key.of("minecraft:block.fire.extinguish"), SoundSource.BLOCK, 0.5F, pitch);
+        for (int i = 0; i < 8; i++) {
+            player.playParticle(Key.of("minecraft:large_smoke"),
+                    pos.x() + ThreadLocalRandom.current().nextDouble(),
+                    pos.y() + ThreadLocalRandom.current().nextDouble(),
+                    pos.z() + ThreadLocalRandom.current().nextDouble()
+            );
+        }
+    }
+
     @EventHandler(priority = EventPriority.HIGH)
     public void onInteractAir(PlayerInteractEvent event) {
         Action action = event.getAction();
@@ -501,7 +596,7 @@ public final class ItemEventListener implements Listener {
                     .withParameter(DirectContextParameters.POSITION, LocationUtils.toWorldPosition(player.getLocation()))
             );
             ItemDefinition itemDefinition = optionalCustomItem.get();
-            if (action.isRightClick()) itemDefinition.execute(context, EventTrigger.RIGHT_CLICK);
+            if (action == Action.RIGHT_CLICK_AIR) itemDefinition.execute(context, EventTrigger.RIGHT_CLICK);
             else itemDefinition.execute(context, EventTrigger.LEFT_CLICK);
         }
 
@@ -510,7 +605,7 @@ public final class ItemEventListener implements Listener {
             return;
         }
 
-        if (action.isRightClick()) {
+        if (action == Action.RIGHT_CLICK_AIR) {
             Optional<ItemBehavior> optionalItemBehavior = itemInHand.getBehavior();
             if (optionalItemBehavior.isPresent()) {
                 InteractionResult useResult = optionalItemBehavior.get().use(serverPlayer.world(), serverPlayer, hand);
@@ -553,8 +648,8 @@ public final class ItemEventListener implements Listener {
         if (event.getPlayer().getGameMode() != GameMode.CREATIVE) {
             Key replacement = itemDefinition.settings().consumeReplacement();
             if (wrapped.count() == 1) {
-                if (replacement != null) {
-                    BukkitItem replacementItem = this.plugin.itemManager().createWrappedItem(replacement, serverPlayer);
+                if (replacement != null && VersionHelper.hasPaperPatch) {
+                    BukkitItem replacementItem = (BukkitItem) Item.byId(replacement, serverPlayer);
                     if (replacementItem != null) {
                         event.setReplacement(replacementItem.getBukkitItem());
                     }
@@ -562,7 +657,7 @@ public final class ItemEventListener implements Listener {
             } else {
                 // fixme 如何取消堆叠数量>1的物品的默认replacement
                 if (replacement != null) {
-                    Item replacementItem = this.plugin.itemManager().createWrappedItem(replacement, serverPlayer);
+                    Item replacementItem = Item.byId(replacement, serverPlayer);
                     if (replacementItem != null) {
                         PlayerUtils.giveItem(serverPlayer, 1, replacementItem, false);
                     }
@@ -590,7 +685,8 @@ public final class ItemEventListener implements Listener {
         int newFoodLevel = MiscUtils.clamp(oldFoodLevel + foodData.nutrition(), 0, 20);
         if (foodData.nutrition() != 0) player.setFoodLevel(newFoodLevel);
         float oldSaturation = player.getSaturation();
-        if (foodData.saturation() != 0) player.setSaturation(MiscUtils.clamp(oldSaturation + foodData.saturation(), 0, newFoodLevel));
+        if (foodData.saturation() != 0)
+            player.setSaturation(MiscUtils.clamp(oldSaturation + foodData.saturation(), 0, newFoodLevel));
     }
 
     @EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
@@ -645,16 +741,6 @@ public final class ItemEventListener implements Listener {
         }
     }
 
-    // 自定义堆肥改了
-    @EventHandler(ignoreCancelled = true)
-    public void onCompost(CompostItemEvent event) {
-        ItemStack itemToCompost = event.getItem();
-        Item wrapped = this.plugin.itemManager().wrap(itemToCompost);
-        Optional<ItemDefinition> optionalCustomItem = wrapped.getDefinition();
-        if (optionalCustomItem.isEmpty()) return;
-        event.setWillRaiseLevel(RandomUtils.generateRandomFloat(0, 1) < optionalCustomItem.get().settings().compostProbability());
-    }
-
     // 用于附魔台纠正
     @EventHandler(ignoreCancelled = true)
     public void onInventoryClick(InventoryClickEvent event) {
@@ -673,7 +759,7 @@ public final class ItemEventListener implements Listener {
         BukkitServerPlayer serverPlayer = BukkitAdaptor.adapt(player);
         if (serverPlayer == null) return;
         this.plugin.scheduler().platform().runDelayed(() -> {
-            Object container = PlayerProxy.INSTANCE.getContainerMenu(serverPlayer.serverPlayer());
+            Object container = PlayerProxy.INSTANCE.getContainerMenu(serverPlayer.minecraftPlayer());
             if (!EnchantmentMenuProxy.CLASS.isInstance(container)) return;
             Object secondSlotItem = SlotProxy.INSTANCE.getItem(AbstractContainerMenuProxy.INSTANCE.getSlot(container, 1));
             if (secondSlotItem == null || ItemStackProxy.INSTANCE.isEmpty(secondSlotItem)) return;
@@ -686,6 +772,78 @@ public final class ItemEventListener implements Listener {
             }
             serverPlayer.sendPackets(packets, false);
         }, null, serverPlayer.platformPlayer());
+    }
+
+    /*
+    左键修复到耐久最大值或用尽材料，右键只消耗单个材料。
+    目标已修满或无法修复时不拦截事件，保持原版交换行为。
+     */
+    @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
+    public void onDragRepairItem(InventoryClickEvent event) {
+        if (!(event.getWhoClicked() instanceof Player player)) return;
+        if (event.getClickedInventory() != player.getInventory()) return;
+        org.bukkit.event.inventory.ClickType clickType = event.getClick();
+        if (clickType != org.bukkit.event.inventory.ClickType.LEFT && clickType != org.bukkit.event.inventory.ClickType.RIGHT)
+            return;
+        ItemStack cursor = event.getCursor();
+        ItemStack current = event.getCurrentItem();
+        if (ItemStackUtils.isEmpty(cursor) || ItemStackUtils.isEmpty(current)) return;
+        Item wrappedMaterial = this.itemManager.wrap(cursor);
+        Optional<ItemDefinition> optionalMaterial = wrappedMaterial.getDefinition();
+        if (optionalMaterial.isEmpty()) return;
+        List<DragRepairItem> dragRepairItems = optionalMaterial.get().settings().dragRepairItems();
+        if (dragRepairItems.isEmpty()) return;
+        Item wrappedTarget = this.itemManager.wrap(current);
+        int maxDamage = wrappedTarget.maxDamage();
+        int damage = wrappedTarget.damage().orElse(0);
+        // 目标无耐久或已修满
+        if (maxDamage <= 0 || damage <= 0) return;
+        Optional<ItemDefinition> optionalTarget = wrappedTarget.getDefinition();
+        Key targetId = wrappedTarget.id();
+        DragRepairItem repairItem = null;
+        for (DragRepairItem item : dragRepairItems) {
+            for (String target : item.targets()) {
+                if (target.charAt(0) == '#') {
+                    Key tag = Key.of(target.substring(1));
+                    if (optionalTarget.isPresent() && optionalTarget.get().is(tag)) {
+                        repairItem = item;
+                        break;
+                    }
+                    if (wrappedTarget.hasVanillaTag(tag)) {
+                        repairItem = item;
+                        break;
+                    }
+                } else if (target.equals(targetId.toString())) {
+                    repairItem = item;
+                    break;
+                }
+            }
+            if (repairItem != null) break;
+        }
+        // 找不到匹配的修复目标
+        if (repairItem == null) return;
+        BukkitServerPlayer serverPlayer = BukkitAdaptor.adapt(player);
+        PlayerOptionalContext context = serverPlayer != null ? PlayerOptionalContext.of(serverPlayer) : null;
+        // 左键逐个材料采样并修复，直到修满或材料用尽；右键只消耗单个材料
+        int maxConsume = clickType == org.bukkit.event.inventory.ClickType.LEFT ? wrappedMaterial.count() : 1;
+        int remainingDamage = damage;
+        int consumeAmount = 0;
+        while (remainingDamage > 0 && consumeAmount < maxConsume) {
+            int durabilityPerItem = repairItem.durabilityPerItem(maxDamage, context);
+            if (durabilityPerItem <= 0) break;
+            remainingDamage -= durabilityPerItem;
+            consumeAmount++;
+        }
+        if (consumeAmount == 0) return;
+        event.setCancelled(true);
+        wrappedTarget.damage(Math.max(remainingDamage, 0));
+        event.setCurrentItem(ItemStackUtils.getBukkitStack(wrappedTarget.minecraftItem()));
+        wrappedMaterial.shrink(consumeAmount);
+        player.setItemOnCursor(wrappedMaterial.count() <= 0 ? null : ItemStackUtils.getBukkitStack(wrappedMaterial.minecraftItem()));
+        SoundData sound = repairItem.sound();
+        if (sound != null && serverPlayer != null) {
+            serverPlayer.playSound(sound.id(), SoundSource.PLAYER, sound.volume().get(), sound.pitch().get());
+        }
     }
 
     /*
@@ -730,7 +888,7 @@ public final class ItemEventListener implements Listener {
         }
         Cancellable dummy = Cancellable.dummy();
         itemDefinition.execute(PlayerOptionalContext.of(serverPlayer, ContextHolder.builder()
-                .withParameter(DirectContextParameters.ENTITY, new BukkitItemEntity(itemDrop))
+                .withParameter(DirectContextParameters.ENTITY, BukkitAdaptor.adapt(itemDrop))
                 .withParameter(DirectContextParameters.POSITION, LocationUtils.toWorldPosition(itemDrop.getLocation()))
                 .withParameter(DirectContextParameters.EVENT, dummy)
         ), EventTrigger.PICK_UP);
@@ -771,6 +929,9 @@ public final class ItemEventListener implements Listener {
     @SuppressWarnings("DuplicatedCode")
     @EventHandler(ignoreCancelled = true)
     public void onPlayerDeath(PlayerDeathEvent event) {
+        // 依赖 paper api实现
+        if (!VersionHelper.hasPaperPatch) return;
+
         BukkitItemManager instance = BukkitItemManager.instance();
 
         // 处理损毁物品
@@ -925,7 +1086,7 @@ public final class ItemEventListener implements Listener {
         if (arrowDefinition.isPresent()) {
             ItemDefinition definition = arrowDefinition.get();
             ProjectileMeta projectileMeta = definition.settings().projectileMeta();
-            if (projectileMeta != null && serverPlayer != null && !serverPlayer.isCreativeMode()) {
+            if (projectileMeta != null && serverPlayer != null && !serverPlayer.isCreativeMode() && VersionHelper.hasPaperPatch) {
                 if (projectileMeta.ignoreInfinityEnchantment() && bowItem.getEnchantment(EnchantmentKeys.INFINITY).isPresent()) {
                     serverPlayer.clearOrCountMatchingInventoryItems(arrowItem.id(), 1);
                     if (projectile instanceof AbstractArrow p1 && projectileMeta.pickupable()) {
@@ -941,19 +1102,6 @@ public final class ItemEventListener implements Listener {
                     arrow.setJavaComponent(DataComponentKeys.INTANGIBLE_PROJECTILE, Map.of());
                     p1.setItemStack(arrow.getBukkitItem());
                 }
-            }
-        }
-    }
-
-    @EventHandler(ignoreCancelled = true)
-    public void onReadyArrow(PlayerReadyArrowEvent event) {
-        BukkitItem bowItem = this.plugin.itemManager().wrap(event.getBow());
-        Optional<ItemDefinition> bowItemDefinition = bowItem.getDefinition();
-        if (bowItemDefinition.isPresent()) {
-            ItemDefinition itemDefinition = bowItemDefinition.get();
-            Set<Key> ammo = itemDefinition.settings().allowedProjectiles();
-            if (!ammo.isEmpty() && !ammo.contains(this.plugin.itemManager().wrap(event.getArrow()).id())) {
-                event.setCancelled(true);
             }
         }
     }
