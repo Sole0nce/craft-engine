@@ -1,17 +1,11 @@
 package net.momirealms.craftengine.core.plugin.config;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
-import dev.dejvokep.boostedyaml.YamlDocument;
-import dev.dejvokep.boostedyaml.block.implementation.Section;
-import dev.dejvokep.boostedyaml.dvs.versioning.BasicVersioning;
-import dev.dejvokep.boostedyaml.libs.org.snakeyaml.engine.v2.common.ScalarStyle;
-import dev.dejvokep.boostedyaml.libs.org.snakeyaml.engine.v2.nodes.Tag;
-import dev.dejvokep.boostedyaml.settings.dumper.DumperSettings;
-import dev.dejvokep.boostedyaml.settings.general.GeneralSettings;
-import dev.dejvokep.boostedyaml.settings.loader.LoaderSettings;
-import dev.dejvokep.boostedyaml.settings.updater.UpdaterSettings;
-import dev.dejvokep.boostedyaml.utils.format.NodeRole;
 import net.kyori.adventure.text.Component;
+import net.momirealms.craftengine.core.attribute.damage.DamageIndicator;
+import net.momirealms.craftengine.core.attribute.damage.DamageIndicators;
+import net.momirealms.craftengine.core.attribute.damage.DamageVisibility;
 import net.momirealms.craftengine.core.entity.furniture.ColliderType;
 import net.momirealms.craftengine.core.item.ItemKeys;
 import net.momirealms.craftengine.core.item.network.encrypt.AESGCM;
@@ -30,12 +24,21 @@ import net.momirealms.craftengine.core.plugin.logger.filter.DisconnectLogFilter;
 import net.momirealms.craftengine.core.util.*;
 import net.momirealms.craftengine.core.world.chunk.storage.CompressionMethod;
 import net.momirealms.craftengine.core.world.chunk.storage.StorageType;
+import net.momirealms.sparrow.yaml.SparrowYaml;
+import net.momirealms.sparrow.yaml.YamlDocument;
+import net.momirealms.sparrow.yaml.node.SectionNode;
+import net.momirealms.sparrow.yaml.upgrade.YamlUpgradeBuilder;
+import net.momirealms.sparrow.yaml.upgrade.YamlUpgradePipeline;
 
-import java.io.*;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 import java.util.stream.Collectors;
 
 public final class Config {
@@ -43,6 +46,7 @@ public final class Config {
     private final CraftEngine plugin;
     private final Path configFilePath;
     private final String configVersion;
+    private final SparrowYaml yaml;
     private YamlDocument config;
     private long lastModified;
     private long size;
@@ -56,6 +60,13 @@ public final class Config {
     private boolean misc$delayConfigurationLoad;
     private boolean misc$multi_threaded_configuration_load;
     private boolean misc$inject_packet_vents;
+    private boolean misc$hook_axiom_paper;
+    private boolean misc$fix_world_memory_leak;
+
+    private boolean scripting$js$enable;
+    private String scripting$js$engine;
+    private boolean scripting$js$nashorn_compat;
+    private boolean scripting$js$strict;
 
     private boolean debug$common;
     private boolean debug$packet;
@@ -159,17 +170,30 @@ public final class Config {
     private boolean chunk_system$restore_custom_blocks_on_chunk_load;
     private boolean chunk_system$sync_custom_blocks_on_chunk_load;
     private boolean chunk_system$cache_system = true;
+    private boolean chunk_system$async_write = true;
+    private boolean chunk_system$async_read = true;
     private boolean chunk_system$injection$target;
     private boolean chunk_system$process_invalid_furniture$enable;
     private Map<String, String> chunk_system$process_invalid_furniture$mapping;
     private boolean chunk_system$process_invalid_blocks$enable;
     private Map<String, String> chunk_system$process_invalid_blocks$mapping;
     private StorageType chunk_system$storage_type;
+    private List<Pattern> chunk_system$blacklisted_worlds = List.of();
     private boolean chunk_system$generation$noise;
     private boolean chunk_system$generation$structure;
     private boolean chunk_system$generation$surface;
     private boolean chunk_system$generation$carver;
     private boolean chunk_system$generation$feature;
+
+    private boolean attribute$enable;
+    private boolean attribute$health_scaling$enable;
+    private double attribute$health_scaling$threshold;
+    private double attribute$health_scaling$visual_max_health;
+
+    private boolean damage_indicator$enable;
+    private DamageVisibility damage_indicator$default_visibility;
+    private boolean damage_indicator$disable_vanilla_particles;
+    private LazyReference<List<DamageIndicator>> damage_indicator$schemes = LazyReference.untilNotNull(List::of);
 
     private boolean furniture$hide_base_entity;
     private ColliderType furniture$collision_entity_type;
@@ -195,10 +219,15 @@ public final class Config {
     private boolean recipe$disable_vanilla_recipes$all;
     private boolean recipe$unlock_on_ingredient_obtained;
     private Set<Key> recipe$disable_vanilla_recipes$list;
+    private boolean recipe$unlock_on_join$all;
+    private Set<Key> recipe$unlock_on_join$list;
     private List<String> recipe$ingredient_sources;
     private boolean recipe$inject_block_entities;
 
-    private List<String> loot$entity_sources;
+    private List<String> entity$id_sources;
+    private boolean entity$tracking$enable;
+    private boolean entity$tracking$whitelist;
+    private Set<Key> entity$tracking$list;
 
     private boolean image$illegal_characters_filter$command;
     private boolean image$illegal_characters_filter$chat;
@@ -224,13 +253,16 @@ public final class Config {
     private boolean network$intercept_packets$item;
     private boolean network$intercept_packets$advancement;
     private boolean network$intercept_packets$player_chat;
+    private boolean network$intercept_packets$combat_kill;
     private boolean network$intercept_packets$dialog;
     private boolean network$disable_item_operations;
     private boolean network$disable_chat_report;
     private boolean network$mod_channel$requires_permission;
     private boolean network$mod_channel$logging_permission_denied;
-    private int network$mod_channel$creative_tab_max_items_per_packet;
+    private int network$mod_channel$creative_tab_max_items_per_packet = 10;
+    private int network$mod_channel$visual_block_states_max_per_packet = 5000;
     private boolean network$item_crypto$enable;
+    private boolean network$optimize_item_codec;
 
     private boolean item$client_bound_model;
     private boolean item$non_italic_tag;
@@ -240,6 +272,7 @@ public final class Config {
     private boolean item$update_triggers$pick_up;
     private int item$custom_model_data_starting_value$default;
     private Map<Key, Integer> item$custom_model_data_starting_value$overrides;
+    private Map<Key, Integer> item$break_power;
     private boolean item$always_use_item_model;
     private boolean item$always_use_custom_model_data;
     private boolean item$always_generate_model_overrides;
@@ -275,11 +308,11 @@ public final class Config {
         this.plugin = plugin;
         this.configVersion = PluginProperties.getValue("config");
         this.configFilePath = this.plugin.dataFolderPath().resolve("config.yml");
+        this.yaml = SparrowYaml.builder().build();
         instance = this;
     }
 
     public boolean updateConfigCache() {
-        // 文件不存在，则保存
         if (!Files.exists(this.configFilePath)) {
             this.plugin.saveResource("config.yml");
         }
@@ -287,19 +320,21 @@ public final class Config {
             BasicFileAttributes attributes = Files.readAttributes(this.configFilePath, BasicFileAttributes.class);
             long lastModified = attributes.lastModifiedTime().toMillis();
             long size = attributes.size();
-            if (lastModified != this.lastModified || size != this.size || this.config == null) {
-                byte[] configFileBytes = Files.readAllBytes(this.configFilePath);
-                try (InputStream inputStream = new ByteArrayInputStream(configFileBytes)) {
-                    this.config = YamlDocument.create(inputStream);
-                    String configVersion = this.config.getString("config-version");
-                    if (!configVersion.equals(this.configVersion)) {
-                        this.updateConfigVersion(configFileBytes);
-                    }
-                }
-                this.lastModified = lastModified;
-                this.size = size;
-                return true;
+            if (lastModified == this.lastModified && size == this.size && this.config != null) {
+                return false;
             }
+
+            YamlDocument loadedConfig;
+            try (InputStream inputStream = Files.newInputStream(this.configFilePath)) {
+                loadedConfig = this.yaml.load(inputStream);
+            }
+            if (!this.configVersion.equals(ConfigVersionExtractor.INSTANCE.extractVersion(loadedConfig))) {
+                loadedConfig = this.updateConfigVersion(loadedConfig);
+            }
+
+            this.config = loadedConfig;
+            this.updateConfigFileAttributes();
+            return true;
         } catch (IOException e) {
             this.plugin.logger().error("Failed to update config.yml", e);
         }
@@ -313,55 +348,68 @@ public final class Config {
         }
     }
 
-    private void updateConfigVersion(byte[] bytes) throws IOException {
-        try (InputStream inputStream = new ByteArrayInputStream(bytes)) {
-            this.config = YamlDocument.create(inputStream, this.plugin.resourceStream("config.yml"), GeneralSettings.builder()
-                            .setRouteSeparator('.')
-                            .setUseDefaults(false)
-                            .build(),
-                    LoaderSettings
-                            .builder()
-                            .setAutoUpdate(true)
-                            .build(),
-                    DumperSettings.builder()
-                            .setEscapeUnprintable(false)
-                            .setScalarFormatter((tag, value, role, def) -> {
-                                if (role == NodeRole.KEY) {
-                                    return ScalarStyle.PLAIN;
-                                } else {
-                                    return tag == Tag.STR ? ScalarStyle.DOUBLE_QUOTED : ScalarStyle.PLAIN;
-                                }
-                            })
-                            .build(),
-                    UpdaterSettings
-                            .builder()
-                            .setVersioning(new BasicVersioning("config-version"))
-                            .addIgnoredRoute(PluginProperties.getValue("config"), "resource-pack.delivery.hosting", '.')
-                            .addIgnoredRoute(PluginProperties.getValue("config"), "chunk-system.process-invalid-blocks.convert", '.')
-                            .addIgnoredRoute(PluginProperties.getValue("config"), "chunk-system.process-invalid-furniture.convert", '.')
-                            .addIgnoredRoute(PluginProperties.getValue("config"), "item.custom-model-data-starting-value.overrides", '.')
-                            .addIgnoredRoute(PluginProperties.getValue("config"), "block.deceive-bukkit-material.overrides", '.')
-                            .build());
+    private YamlDocument updateConfigVersion(YamlDocument loadedConfig) throws IOException {
+        YamlDocument upgradedConfig;
+        try (InputStream defaultInputStream = this.plugin.resourceStream("config.yml")) {
+            if (defaultInputStream == null) {
+                throw new IOException("Embedded config.yml not found");
+            }
+            YamlUpgradePipeline pipeline = yamlUpgradeBuilder()
+                    .updateComments(true)
+                    .deleteRemovedNodes(true)
+                    .build();
+            upgradedConfig = pipeline.upgrade(
+                    loadedConfig,
+                    this.yaml.load(defaultInputStream),
+                    List.of(
+                            YamlUtils.route("resource-pack.delivery.hosting"),
+                            YamlUtils.route("chunk-system.process-invalid-blocks.convert"),
+                            YamlUtils.route("chunk-system.process-invalid-furniture.convert"),
+                            YamlUtils.route("item.custom-model-data-starting-value.overrides"),
+                            YamlUtils.route("item.break-power"),
+                            YamlUtils.route("damage-indicator.schemes"),
+                            YamlUtils.route("block.deceive-bukkit-material.overrides")
+                    )
+            );
         }
         try {
-            this.config.save(new File(plugin.dataFolderFile(), "config.yml"));
+            upgradedConfig.save(this.configFilePath);
         } catch (IOException e) {
             this.plugin.logger().warn("Could not save config.yml", e);
         }
+        return upgradedConfig;
+    }
+
+    public static YamlUpgradeBuilder yamlUpgradeBuilder() {
+        return YamlUpgradePipeline.builder().versionExtractor(ConfigVersionExtractor.INSTANCE);
+    }
+
+    private void updateConfigFileAttributes() throws IOException {
+        BasicFileAttributes attributes = Files.readAttributes(this.configFilePath, BasicFileAttributes.class);
+        this.lastModified = attributes.lastModifiedTime().toMillis();
+        this.size = attributes.size();
     }
 
     public void loadForcedLocale() {
-        YamlDocument config = settings();
+        YamlUtils.Reader config = YamlUtils.reader(settings());
         this.forcedLocale = TranslationManager.parseLocale(config.getString("forced-locale", ""));
     }
 
     @SuppressWarnings("DuplicatedCode")
     public void loadFullSettings() {
-        YamlDocument config = settings();
+        YamlUtils.Reader config = YamlUtils.reader(settings());
         this.forcedLocale = TranslationManager.parseLocale(config.getString("forced-locale", ""));
         this.misc$delayConfigurationLoad = config.getBoolean("misc.delay-configuration-load", true);
         this.misc$multi_threaded_configuration_load = config.getBoolean("misc.multi-threaded-configuration-load", true);
         this.misc$inject_packet_vents = config.getBoolean("misc.inject-packetevents", false);
+        this.misc$hook_axiom_paper = config.getBoolean("misc.hook-axiompaper", true);
+        this.misc$fix_world_memory_leak = config.getBoolean("misc.fix-world-memory-leak", false);
+
+        // scripting
+        this.scripting$js$enable = config.getBoolean("scripting.js.enable", false);
+        this.scripting$js$engine = config.getString("scripting.js.engine", "nashorn");
+        this.scripting$js$nashorn_compat = config.getBoolean("scripting.js.nashorn-compat", true);
+        this.scripting$js$strict = config.getBoolean("scripting.js.strict", true);
 
         // basics
         this.metrics = config.getBoolean("metrics", false);
@@ -448,7 +496,7 @@ public final class Config {
         this.resource_pack$protection$obfuscation$item_model$enable = config.getBoolean("resource-pack.protection.obfuscation.item-model.enable", false) && this.resource_pack$protection$obfuscation$enable;
         this.resource_pack$protection$obfuscation$item_model$use_cache = config.getBoolean("resource-pack.protection.obfuscation.item-model.use-cache", true);
         this.resource_pack$protection$obfuscation$path$block_source = config.getString("resource-pack.protection.obfuscation.path.block-source", "obf_block");
-        this.resource_pack$protection$obfuscation$path$item_source = config.getString("resource-pack.protection.obfuscation.path.block-source", "obf_item");
+        this.resource_pack$protection$obfuscation$path$item_source = config.getString("resource-pack.protection.obfuscation.path.item-source", "obf_item");
         this.resource_pack$protection$obfuscation$atlas$images_per_canvas = Math.max(0, config.getInt("resource-pack.protection.obfuscation.atlas.images-per-canvas", 256));
         this.resource_pack$protection$obfuscation$atlas$prefix = config.getString("resource-pack.protection.obfuscation.atlas.prefix", "atlas");
         this.resource_pack$protection$obfuscation$bypass_textures = config.getStringList("resource-pack.protection.obfuscation.bypass-textures");
@@ -509,13 +557,24 @@ public final class Config {
         } catch (IllegalArgumentException e) {
             this.chunk_system$storage_type = StorageType.MCA;
         }
+        ImmutableList.Builder<Pattern> blacklistedWorldsBuilder = ImmutableList.builder();
+        for (String regex : config.getStringList("chunk-system.blacklisted-worlds")) {
+            try {
+                blacklistedWorldsBuilder.add(Pattern.compile(regex));
+            } catch (PatternSyntaxException e) {
+                this.plugin.logger().warn("Invalid regex in chunk-system.blacklisted-worlds: " + regex, e);
+            }
+        }
+        this.chunk_system$blacklisted_worlds = blacklistedWorldsBuilder.build();
         this.chunk_system$restore_vanilla_blocks_on_chunk_unload = config.getBoolean("chunk-system.restore-vanilla-blocks-on-chunk-unload", true);
         this.chunk_system$restore_custom_blocks_on_chunk_load = config.getBoolean("chunk-system.restore-custom-blocks-on-chunk-load", true);
         this.chunk_system$sync_custom_blocks_on_chunk_load = config.getBoolean("chunk-system.sync-custom-blocks-on-chunk-load", false);
         this.chunk_system$cache_system = config.getBoolean("chunk-system.cache-system", true);
+        this.chunk_system$async_write = config.getBoolean("chunk-system.async-write", true);
+        this.chunk_system$async_read = config.getBoolean("chunk-system.async-read", true);
 
         if (this.firstTime) {
-            this.chunk_system$injection$target = config.getString("chunk-system.injection.target", "palette").equalsIgnoreCase("palette");
+            this.chunk_system$injection$target = config.getString("chunk-system.injection.target", "palette").equalsIgnoreCase("palette") || (VersionHelper.hasLeafPatch && !VersionHelper.isOrAbove1_21_11);
         }
 
         this.chunk_system$process_invalid_furniture$enable = config.getBoolean("chunk-system.process-invalid-furniture.enable", false);
@@ -524,10 +583,10 @@ public final class Config {
             furnitureBuilder.put(furniture, "");
         }
         if (config.contains("chunk-system.process-invalid-furniture.convert")) {
-            Section section = config.getSection("chunk-system.process-invalid-furniture.convert");
+            SectionNode section = config.getSection("chunk-system.process-invalid-furniture.convert");
             if (section != null) {
-                for (Map.Entry<String, Object> entry : section.getStringRouteMappedValues(false).entrySet()) {
-                    furnitureBuilder.put(entry.getKey(), entry.getValue().toString());
+                for (Map.Entry<Object, Object> entry : section.getValues().entrySet()) {
+                    furnitureBuilder.put(entry.getKey().toString(), entry.getValue().toString());
                 }
             }
         }
@@ -539,10 +598,10 @@ public final class Config {
             blockBuilder.put(furniture, "");
         }
         if (config.contains("chunk-system.process-invalid-blocks.convert")) {
-            Section section = config.getSection("chunk-system.process-invalid-blocks.convert");
+            SectionNode section = config.getSection("chunk-system.process-invalid-blocks.convert");
             if (section != null) {
-                for (Map.Entry<String, Object> entry : section.getStringRouteMappedValues(false).entrySet()) {
-                    blockBuilder.put(entry.getKey(), entry.getValue().toString());
+                for (Map.Entry<Object, Object> entry : section.getValues().entrySet()) {
+                    blockBuilder.put(entry.getKey().toString(), entry.getValue().toString());
                 }
             }
         }
@@ -553,6 +612,20 @@ public final class Config {
         this.chunk_system$generation$noise = config.getBoolean("chunk-system.generation.noise", true);
         this.chunk_system$generation$structure = config.getBoolean("chunk-system.generation.structure", true);
         this.chunk_system$generation$surface = config.getBoolean("chunk-system.generation.surface", true);
+
+        // attribute
+        if (this.firstTime) {
+            this.attribute$enable = config.getBoolean("attribute.enable", true);
+        }
+        this.attribute$health_scaling$enable = config.getBoolean("attribute.health-scaling.enable", false);
+        this.attribute$health_scaling$threshold = config.getDouble("attribute.health-scaling.threshold", 20d);
+        this.attribute$health_scaling$visual_max_health = config.getDouble("attribute.health-scaling.visual-max-health", 20d);
+
+        // damage indicator
+        this.damage_indicator$enable = config.getBoolean("damage-indicator.enable", false);
+        this.damage_indicator$default_visibility = DamageVisibility.byName(config.getString("damage-indicator.default-visibility", "self"), DamageVisibility.SELF);
+        this.damage_indicator$disable_vanilla_particles = config.getBoolean("damage-indicator.disable-vanilla-particles", false);
+        this.damage_indicator$schemes = LazyReference.untilNotNull(() -> parseDamageIndicatorSchemes(settings()));
 
         // furniture
         this.furniture$hide_base_entity = config.getBoolean("furniture.hide-base-entity", true);
@@ -599,19 +672,33 @@ public final class Config {
         } else {
             this.item$data_fixer_upper$fallback_version = Integer.parseInt(fallbackVersion);
         }
-        Section customModelDataOverridesSection = config.getSection("item.custom-model-data-starting-value.overrides");
+        SectionNode customModelDataOverridesSection = config.getSection("item.custom-model-data-starting-value.overrides");
         if (customModelDataOverridesSection != null) {
             Map<Key, Integer> customModelDataOverrides = new HashMap<>();
-            for (Map.Entry<String, Object> entry : customModelDataOverridesSection.getStringRouteMappedValues(false).entrySet()) {
+            for (Map.Entry<Object, Object> entry : customModelDataOverridesSection.getValues().entrySet()) {
                 if (entry.getValue() instanceof String s) {
-                    customModelDataOverrides.put(Key.of(entry.getKey()), Integer.parseInt(s));
+                    customModelDataOverrides.put(Key.of(entry.getKey().toString()), Integer.parseInt(s));
                 } else if (entry.getValue() instanceof Integer i) {
-                    customModelDataOverrides.put(Key.of(entry.getKey()), i);
+                    customModelDataOverrides.put(Key.of(entry.getKey().toString()), i);
                 }
             }
             this.item$custom_model_data_starting_value$overrides = customModelDataOverrides;
         } else {
             this.item$custom_model_data_starting_value$overrides = Map.of();
+        }
+        SectionNode breakPowerSection = config.getSection("item.break-power");
+        if (breakPowerSection != null) {
+            Map<Key, Integer> breakPowerOverrides = new HashMap<>();
+            for (Map.Entry<Object, Object> entry : breakPowerSection.getValues().entrySet()) {
+                if (entry.getValue() instanceof String s) {
+                    breakPowerOverrides.put(Key.of(entry.getKey().toString()), Integer.parseInt(s));
+                } else if (entry.getValue() instanceof Integer i) {
+                    breakPowerOverrides.put(Key.of(entry.getKey().toString()), i);
+                }
+            }
+            this.item$break_power = breakPowerOverrides;
+        } else {
+            this.item$break_power = Map.of();
         }
 
         // block
@@ -629,10 +716,10 @@ public final class Config {
         if (this.firstTime) {
             this.block$deceive_bukkit_material$default = Key.of(config.getString("block.deceive-bukkit-material.default", "bricks"));
             this.block$deceive_bukkit_material$overrides = new HashMap<>();
-            Section overridesSection = config.getSection("block.deceive-bukkit-material.overrides");
+            SectionNode overridesSection = config.getSection("block.deceive-bukkit-material.overrides");
             if (overridesSection != null) {
-                for (Map.Entry<String, Object> entry : overridesSection.getStringRouteMappedValues(false).entrySet()) {
-                    String key = entry.getKey();
+                for (Map.Entry<Object, Object> entry : overridesSection.getValues().entrySet()) {
+                    String key = entry.getKey().toString();
                     Key value = Key.of(String.valueOf(entry.getValue()));
                     if (key.contains("~")) {
                         int min = Integer.parseInt(key.split("~")[0]);
@@ -656,12 +743,27 @@ public final class Config {
         this.recipe$disable_vanilla_recipes$list = config.getStringList("recipe.disable-vanilla-recipes.list").stream().map(Key::of).collect(Collectors.toSet());
         this.recipe$ingredient_sources = config.getStringList("recipe.ingredient-sources");
         this.recipe$unlock_on_ingredient_obtained = config.getBoolean("recipe.unlock-on-ingredient-obtained", true);
+        this.recipe$unlock_on_join$all = config.getBoolean("recipe.unlock-on-join.all", false);
+        this.recipe$unlock_on_join$list = config.getStringList("recipe.unlock-on-join.list").stream().map(Key::of).collect(Collectors.toSet());
         if (this.firstTime) {
             this.recipe$inject_block_entities = config.getBoolean("recipe.inject-block-entities", true);
         }
 
-        // loot
-        this.loot$entity_sources = config.getStringList("recipe.entity-sources");
+        // entity identity providers used by loot sources and other entity systems
+        this.entity$id_sources = config.getStringList("entity.id-sources");
+        this.entity$tracking$enable = config.getBoolean("entity.tracking.enable", true);
+        String trackingMode = config.getString("entity.tracking.mode", "whitelist");
+        this.entity$tracking$whitelist = switch (trackingMode.toLowerCase(Locale.ROOT)) {
+            case "whitelist" -> true;
+            case "blacklist" -> false;
+            default -> {
+                this.plugin.logger().warn("Unknown entity tracking mode '" + trackingMode + "'. Falling back to whitelist.");
+                yield true;
+            }
+        };
+        this.entity$tracking$list = config.getStringList("entity.tracking.list").stream()
+                .map(Key::of)
+                .collect(Collectors.toUnmodifiableSet());
 
         // image
         this.image$illegal_characters_filter$anvil = config.getBoolean("image.illegal-characters-filter.anvil", true);
@@ -671,14 +773,14 @@ public final class Config {
         this.image$illegal_characters_filter$sign = config.getBoolean("image.illegal-characters-filter.sign", true);
 
         this.image$codepoint_starting_value$default = config.getInt("image.codepoint-starting-value.default", 0);
-        Section codepointOverridesSection = config.getSection("image.codepoint-starting-value.overrides");
+        SectionNode codepointOverridesSection = config.getSection("image.codepoint-starting-value.overrides");
         if (codepointOverridesSection != null) {
             Map<Key, Integer> codepointOverrides = new HashMap<>();
-            for (Map.Entry<String, Object> entry : codepointOverridesSection.getStringRouteMappedValues(false).entrySet()) {
+            for (Map.Entry<Object, Object> entry : codepointOverridesSection.getValues().entrySet()) {
                 if (entry.getValue() instanceof String s) {
-                    codepointOverrides.put(Key.of(entry.getKey()), Integer.parseInt(s));
+                    codepointOverrides.put(Key.of(entry.getKey().toString()), Integer.parseInt(s));
                 } else if (entry.getValue() instanceof Integer i) {
-                    codepointOverrides.put(Key.of(entry.getKey()), i);
+                    codepointOverrides.put(Key.of(entry.getKey().toString()), i);
                 }
             }
             this.image$codepoint_starting_value$overrides = codepointOverrides;
@@ -690,6 +792,7 @@ public final class Config {
             this.network$disable_chat_report = config.getBoolean("network.disable-chat-report", false);
         }
         this.network$disable_item_operations = config.getBoolean("network.disable-item-operations", false);
+        this.network$optimize_item_codec = config.getBoolean("network.optimize-item-codec", true);
         this.network$intercept_packets$system_chat = config.getBoolean("network.intercept-packets.system-chat", true);
         this.network$intercept_packets$tab_list = config.getBoolean("network.intercept-packets.tab-list", true);
         this.network$intercept_packets$actionbar = config.getBoolean("network.intercept-packets.actionbar", true);
@@ -706,10 +809,12 @@ public final class Config {
         this.network$intercept_packets$item = config.getBoolean("network.intercept-packets.item", true);
         this.network$intercept_packets$advancement = config.getBoolean("network.intercept-packets.advancement", true);
         this.network$intercept_packets$player_chat = config.getBoolean("network.intercept-packets.player-chat", true);
+        this.network$intercept_packets$combat_kill = config.getBoolean("network.intercept-packets.combat-kill", true);
         this.network$intercept_packets$dialog = config.getBoolean("network.intercept-packets.dialog", true);
         this.network$mod_channel$requires_permission = config.getBoolean("network.mod-channel.requires-permission", true);
         this.network$mod_channel$logging_permission_denied = config.getBoolean("network.mod-channel.logging-permission-denied", true);
         this.network$mod_channel$creative_tab_max_items_per_packet = Math.max(config.getInt("network.mod-channel.creative-tab-max-items-per-packet", 10), 1);
+        this.network$mod_channel$visual_block_states_max_per_packet = Math.max(config.getInt("network.mod-channel.visual-block-states-max-per-packet", 5000), 1);
         if (this.firstTime) {
             this.network$item_crypto$enable = config.getBoolean("network.item-crypto.enable", false);
             if (this.network$item_crypto$enable) {
@@ -776,6 +881,30 @@ public final class Config {
 
     public static boolean injectPacketEvents() {
         return instance.misc$inject_packet_vents;
+    }
+
+    public static boolean enableJsScripting() {
+        return instance.scripting$js$enable;
+    }
+
+    public static String jsEngine() {
+        return instance.scripting$js$engine;
+    }
+
+    public static boolean jsNashornCompat() {
+        return instance.scripting$js$nashorn_compat;
+    }
+
+    public static boolean jsStrictMode() {
+        return instance.scripting$js$strict;
+    }
+
+    public static boolean hookAxiomPaper() {
+        return instance.misc$hook_axiom_paper;
+    }
+
+    public static boolean fixWorldMemoryLeak() {
+        return instance.misc$fix_world_memory_leak;
     }
 
     public static boolean debugCommon() {
@@ -1161,6 +1290,10 @@ public final class Config {
         return instance.item$custom_model_data_starting_value$default;
     }
 
+    public static Map<Key, Integer> itemBreakPowerOverrides() {
+        return instance.item$break_power;
+    }
+
     public static int codepointStartingValue(Key font) {
         if (instance.image$codepoint_starting_value$overrides.containsKey(font)) {
             return instance.image$codepoint_starting_value$overrides.get(font);
@@ -1180,6 +1313,15 @@ public final class Config {
         return instance.chunk_system$storage_type;
     }
 
+    public static boolean isBlacklistedWorld(String world) {
+        for (Pattern pattern : instance.chunk_system$blacklisted_worlds) {
+            if (pattern.matcher(world).matches()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static boolean disableChatReport() {
         return instance.network$disable_chat_report;
     }
@@ -1196,12 +1338,20 @@ public final class Config {
         return instance.network$mod_channel$creative_tab_max_items_per_packet;
     }
 
+    public static int modChannelVisualBlockStatesMaxPerPacket() {
+        return instance.network$mod_channel$visual_block_states_max_per_packet;
+    }
+
     public static boolean enableItemCrypto() {
         return instance.network$item_crypto$enable;
     }
 
     public static boolean disableItemOperations() {
         return instance.network$disable_item_operations;
+    }
+
+    public static boolean optimizeItemCodec() {
+        return instance.network$optimize_item_codec;
     }
 
     public static boolean interceptSystemChat() {
@@ -1268,6 +1418,10 @@ public final class Config {
         return instance.network$intercept_packets$player_chat;
     }
 
+    public static boolean interceptCombatKill() {
+        return instance.network$intercept_packets$combat_kill;
+    }
+
     public static boolean interceptDialog() {
         return instance.network$intercept_packets$dialog;
     }
@@ -1310,6 +1464,14 @@ public final class Config {
 
     public static boolean enableChunkCache() {
         return instance.chunk_system$cache_system;
+    }
+
+    public static boolean enableAsyncChunkWrite() {
+        return instance.chunk_system$async_write;
+    }
+
+    public static boolean enableAsyncChunkRead() {
+        return instance.chunk_system$async_read;
     }
 
     public static boolean addNonItalicTag() {
@@ -1380,12 +1542,29 @@ public final class Config {
         return instance.recipe$inject_block_entities;
     }
 
-    public static List<String> lootEntitySources() {
-        return instance.loot$entity_sources;
+    public static List<String> entityIdSources() {
+        return instance.entity$id_sources;
+    }
+
+    public static boolean enableEntityTracking() {
+        return instance.entity$tracking$enable;
+    }
+
+    public static boolean shouldTrackEntity(Key entity) {
+        boolean listed = instance.entity$tracking$list.contains(entity);
+        return instance.entity$tracking$whitelist == listed;
     }
 
     public static boolean unlockOnIngredientObtained() {
         return instance.recipe$unlock_on_ingredient_obtained;
+    }
+
+    public static boolean unlockAllRecipesOnJoin() {
+        return instance.recipe$unlock_on_join$all;
+    }
+
+    public static Set<Key> unlockRecipesOnJoinList() {
+        return instance.recipe$unlock_on_join$list;
     }
 
     public static boolean triggerUpdateAttack() {
@@ -1576,9 +1755,62 @@ public final class Config {
         return instance.chunk_system$generation$surface;
     }
 
-    public YamlDocument loadYamlConfig(String filePath, GeneralSettings generalSettings, LoaderSettings loaderSettings, DumperSettings dumperSettings, UpdaterSettings updaterSettings) {
-        try (InputStream inputStream = new FileInputStream(resolveConfig(filePath).toFile())) {
-            return YamlDocument.create(inputStream, this.plugin.resourceStream(filePath), generalSettings, loaderSettings, dumperSettings, updaterSettings);
+    public static boolean enableAttributeSystem() {
+        return instance.attribute$enable;
+    }
+
+    public static boolean enableDamageIndicator() {
+        return instance.damage_indicator$enable;
+    }
+
+    public static DamageVisibility damageIndicatorDefaultVisibility() {
+        return instance.damage_indicator$default_visibility;
+    }
+
+    public static List<DamageIndicator> damageIndicatorSchemes() {
+        return instance.damage_indicator$schemes.get();
+    }
+
+    public static boolean enableHealthScaling() {
+        return instance.attribute$health_scaling$enable;
+    }
+
+    public static double healthScalingThreshold() {
+        return instance.attribute$health_scaling$threshold;
+    }
+
+    public static double healthScalingVisualMaxHealth() {
+        return instance.attribute$health_scaling$visual_max_health;
+    }
+
+    public static boolean disableVanillaDamageParticles() {
+        return instance.damage_indicator$disable_vanilla_particles;
+    }
+
+    private List<DamageIndicator> parseDamageIndicatorSchemes(YamlDocument config) {
+        List<Map<?, ?>> list = YamlUtils.reader(config).getMapList("damage-indicator.schemes");
+        if (list == null) return List.of();
+        List<DamageIndicator> schemes = new ArrayList<>(list.size());
+        int index = 0;
+        for (Map<?, ?> element : list) {
+            String path = "damage-indicator.schemes." + index++;
+            try {
+                schemes.add(DamageIndicators.fromConfig(ConfigSection.of(path, element)));
+            } catch (Throwable t) {
+                this.plugin.logger().warn("Failed to load damage indicator scheme at " + path, t);
+            }
+        }
+        return List.copyOf(schemes);
+    }
+
+    public YamlDocument loadYamlConfig(String filePath, YamlUpgradePipeline pipeline) {
+        try (InputStream inputStream = new FileInputStream(resolveConfig(filePath).toFile());
+             InputStream defaultInputStream = this.plugin.resourceStream(filePath)) {
+            YamlDocument document = this.yaml.load(inputStream);
+            if (defaultInputStream == null) {
+                return document;
+            }
+            return pipeline.upgrade(document, this.yaml.load(defaultInputStream));
         } catch (IOException e) {
             this.plugin.logger().error("Failed to load config " + filePath, e);
             return null;
@@ -1587,7 +1819,7 @@ public final class Config {
 
     public YamlDocument loadYamlData(Path file) {
         try (InputStream inputStream = Files.newInputStream(file)) {
-            return YamlDocument.create(inputStream);
+            return this.yaml.load(inputStream);
         } catch (IOException e) {
             this.plugin.logger().error("Failed to load config " + file, e);
             return null;

@@ -27,24 +27,32 @@ public interface ItemManager extends Manageable, ModelGenerator {
 
     Map<Key, Equipment> equipments();
 
-    Collection<Key> vanillaItems();
+    List<Key> vanillaItems();
 
+    @Deprecated
     @Nullable
     Item createCustomWrappedItem(Key id, @Nullable Player player);
 
+    @Deprecated
     @Nullable
     Item createWrappedItem(Key id, @Nullable Player player);
 
     @NotNull
     Item wrap(Object itemStack);
 
-    Item fromBytes(byte[] bytes);
+    default Item fromBytes(byte[] bytes) {
+        return fromBytes(bytes, true);
+    }
+
+    Item fromBytes(byte[] bytes, boolean useCache);
 
     Item fromNBT(CompoundTag tag);
 
     Map<Key, ItemDefinition> loadedItems();
 
     List<Key> orderedItemIds();
+
+    List<Key> allItemIds();
 
     Optional<Equipment> getEquipment(Key key);
 

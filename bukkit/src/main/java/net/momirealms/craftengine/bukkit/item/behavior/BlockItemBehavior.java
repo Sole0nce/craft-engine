@@ -27,9 +27,11 @@ import net.momirealms.craftengine.core.plugin.config.Config;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.plugin.config.ConfigValue;
+import net.momirealms.craftengine.core.plugin.context.Context;
 import net.momirealms.craftengine.core.plugin.context.ContextHolder;
 import net.momirealms.craftengine.core.plugin.context.EventTrigger;
 import net.momirealms.craftengine.core.plugin.context.PlayerOptionalContext;
+import net.momirealms.craftengine.core.plugin.context.function.Function;
 import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
 import net.momirealms.craftengine.core.util.Cancellable;
 import net.momirealms.craftengine.core.util.Direction;
@@ -41,6 +43,7 @@ import net.momirealms.craftengine.core.world.context.BlockPlaceContext;
 import net.momirealms.craftengine.core.world.context.UseOnContext;
 import net.momirealms.craftengine.proxy.bukkit.craftbukkit.CraftWorldProxy;
 import net.momirealms.craftengine.proxy.bukkit.craftbukkit.block.CraftBlockProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.level.CollisionGetterProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.LevelProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.block.state.BlockBehaviourProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.phys.shapes.CollisionContextProxy;
@@ -118,8 +121,6 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
 //            return InteractionResult.FAIL;
 //        }
 
-        ContextHolder.Builder contextBuilder = ContextHolder.builder();
-
         if (player != null) {
 
             if (player.isAdventureMode()) {
@@ -140,7 +141,7 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
 
             // trigger event
             CustomBlockAttemptPlaceEvent attemptPlaceEvent = new CustomBlockAttemptPlaceEvent(bukkitPlayer, placeLocation.clone(), blockStateToPlace,
-                    DirectionUtils.toBlockFace(context.getClickedFace()), bukkitBlock, context.getHand(), contextBuilder);
+                    DirectionUtils.toBlockFace(context.getClickedFace()), bukkitBlock, context.getHand());
             if (EventUtils.fireAndCheckCancel(attemptPlaceEvent)) {
                 return InteractionResult.FAIL;
             }
@@ -165,7 +166,7 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
             }
 
             // call custom event
-            CustomBlockPlaceEvent customPlaceEvent = new CustomBlockPlaceEvent(bukkitPlayer, placeLocation.clone(), blockStateToPlace, world.getBlockAt(placeLocation), context.getHand(), contextBuilder);
+            CustomBlockPlaceEvent customPlaceEvent = new CustomBlockPlaceEvent(bukkitPlayer, placeLocation.clone(), blockStateToPlace, world.getBlockAt(placeLocation), context.getHand());
             if (EventUtils.fireAndCheckCancel(customPlaceEvent)) {
                 // revert changes
                 for (BlockState state : revertStates) {
@@ -176,21 +177,26 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
         }
 
         WorldPosition position = new WorldPosition(context.getLevel(), pos.x() + 0.5, pos.y() + 0.5, pos.z() + 0.5);
-        Cancellable dummy = Cancellable.dummy();
-        PlayerOptionalContext functionContext = PlayerOptionalContext.of(player,
-                contextBuilder
-                .withParameter(DirectContextParameters.BLOCK, new BukkitExistingBlock(bukkitBlock))
-                .withParameter(DirectContextParameters.POSITION, position)
-                .withParameter(DirectContextParameters.EVENT, dummy)
-                .withParameter(DirectContextParameters.HAND, context.getHand())
-                .withParameter(DirectContextParameters.ITEM_IN_HAND, context.getItem())
-        );
-        block.execute(functionContext, EventTrigger.PLACE);
-        if (dummy.isCancelled()) {
-            for (BlockState state : revertStates) {
-                state.update(true, false);
+
+        List<Function<Context>> functions = block.eventFunctions(EventTrigger.PLACE);
+        if (!functions.isEmpty()) {
+            Cancellable dummy = Cancellable.dummy();
+            Function.execute(PlayerOptionalContext.of(player,
+                    ContextHolder.builder()
+                            .withOptionalParameter(DirectContextParameters.PLAYER, player)
+                            .withParameter(DirectContextParameters.BLOCK, new BukkitExistingBlock(bukkitBlock))
+                            .withParameter(DirectContextParameters.POSITION, position)
+                            .withParameter(DirectContextParameters.EVENT, dummy)
+                            .withParameter(DirectContextParameters.HAND, context.getHand())
+                            .withParameter(DirectContextParameters.ITEM_IN_HAND, context.getItem())
+                            .build()
+            ), functions);
+            if (dummy.isCancelled()) {
+                for (BlockState state : revertStates) {
+                    state.update(true, false);
+                }
+                return InteractionResult.FAIL;
             }
-            return InteractionResult.FAIL;
         }
 
         // 放置多元素
@@ -198,7 +204,7 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
                 context.getLevel().minecraftWorld(),
                 LocationUtils.toBlockPos(context.getClickedPos()),
                 blockStateToPlace.customBlockState().minecraftState(),
-                Optional.ofNullable(context.getPlayer()).map(Player::serverPlayer).orElse(null),
+                Optional.ofNullable(context.getPlayer()).map(Player::minecraftPlayer).orElse(null),
                 context.getItem().minecraftItem()
         });
 
@@ -217,7 +223,7 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
         }
 
         context.getLevel().playBlockSound(position, blockStateToPlace.settings().sounds().placeSound());
-        world.sendGameEvent(bukkitPlayer, GameEvent.BLOCK_PLACE, new Vector(pos.x(), pos.y(), pos.z()));
+        LevelUtils.sendGameEvent(world, bukkitPlayer, GameEvent.BLOCK_PLACE, new Vector(pos.x(), pos.y(), pos.z()));
         return InteractionResult.SUCCESS;
     }
 
@@ -247,10 +253,10 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
         return true;
     }
 
-    @SuppressWarnings("UnstableApiUsage")
+    @SuppressWarnings({"UnstableApiUsage", "removal"})
     protected boolean canPlace(BlockPlaceContext context, ImmutableBlockState state) {
         Player cePlayer = context.getPlayer();
-        Object player = cePlayer != null ? cePlayer.serverPlayer() : null;
+        Object player = cePlayer != null ? cePlayer.minecraftPlayer() : null;
         Object blockState = state.customBlockState().minecraftState();
         Object blockPos = LocationUtils.toBlockPos(context.getClickedPos());
         Object voxelShape;
@@ -262,14 +268,23 @@ public class BlockItemBehavior extends ItemBehavior implements BlockItem {
             voxelShape = CollisionContextProxy.INSTANCE.empty();
         }
         Object world = CraftWorldProxy.INSTANCE.getWorld((World) context.getLevel().platformWorld());
-        boolean defaultReturn = ((!this.checkStatePlacement() || BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.canSurvive(blockState, world, blockPos))
-                && LevelProxy.INSTANCE.checkEntityCollision(world, blockState, player, voxelShape, blockPos, true)); // paper only
+        boolean defaultReturn = ((!this.checkStatePlacement() || BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.canSurvive(blockState, world, blockPos)) &&
+                (VersionHelper.hasPaperPatch ?
+                        LevelProxy.INSTANCE.checkEntityCollision(world, blockState, player, voxelShape, blockPos, true) : // paper
+                        CollisionGetterProxy.INSTANCE.isUnobstructed(world, blockState, blockPos, CollisionContextProxy.INSTANCE.placementContext(player)))); // spigot
         Block block = CraftBlockProxy.INSTANCE.at(world, blockPos);
         BlockData blockData = BlockStateUtils.fromBlockData(blockState);
-        BlockCanBuildEvent canBuildEvent = new BlockCanBuildEvent(
-                block, cePlayer != null ? (org.bukkit.entity.Player) cePlayer.platformPlayer() : null, blockData, defaultReturn,
-                context.getHand() == InteractionHand.MAIN_HAND ? EquipmentSlot.HAND : EquipmentSlot.OFF_HAND
-        );
+        BlockCanBuildEvent canBuildEvent;
+        if (VersionHelper.hasPaperPatch) {
+            canBuildEvent = new BlockCanBuildEvent(
+                    block, cePlayer != null ? (org.bukkit.entity.Player) cePlayer.platformPlayer() : null, blockData, defaultReturn,
+                    context.getHand() == InteractionHand.MAIN_HAND ? EquipmentSlot.HAND : EquipmentSlot.OFF_HAND
+            );
+        } else {
+            canBuildEvent = new BlockCanBuildEvent(
+                    block, cePlayer != null ? (org.bukkit.entity.Player) cePlayer.platformPlayer() : null, blockData, defaultReturn
+            );
+        }
         Bukkit.getPluginManager().callEvent(canBuildEvent);
         return canBuildEvent.isBuildable();
     }

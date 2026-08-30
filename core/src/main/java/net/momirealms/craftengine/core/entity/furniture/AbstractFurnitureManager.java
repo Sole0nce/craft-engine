@@ -20,6 +20,7 @@ import net.momirealms.craftengine.core.plugin.config.lifecycle.LoadingStages;
 import net.momirealms.craftengine.core.plugin.context.CommonFunctions;
 import net.momirealms.craftengine.core.plugin.context.Context;
 import net.momirealms.craftengine.core.plugin.context.EventTrigger;
+import net.momirealms.craftengine.core.plugin.context.EventTriggerResolver;
 import net.momirealms.craftengine.core.plugin.context.function.Function;
 import net.momirealms.craftengine.core.plugin.scheduler.SchedulerTask;
 import net.momirealms.craftengine.core.util.Key;
@@ -37,6 +38,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.function.Supplier;
 
 public abstract class AbstractFurnitureManager implements FurnitureManager {
+    private static final EventTriggerResolver EVENT_TRIGGER_RESOLVER = EventTriggerResolver.withAlias("break", EventTrigger.FURNITURE_BREAK);
     protected final Map<Key, FurnitureDefinition> byId = new ConcurrentHashMap<>();
     protected final CraftEngine plugin;
     protected final IdSectionConfigParser furnitureParser;
@@ -150,14 +152,12 @@ public abstract class AbstractFurnitureManager implements FurnitureManager {
 
     @Override
     public void delayedInit() {
-        if (!VersionHelper.isFolia) {
+        if (!VersionHelper.hasFoliaPatch) {
             if (this.syncTickTask == null || this.syncTickTask.cancelled())
                 this.syncTickTask = CraftEngine.instance().scheduler().platform().runRepeating(this::syncTick, 1, 1);
         }
         if (this.asyncTickTask == null || this.asyncTickTask.cancelled())
-            this.asyncTickTask = CraftEngine.instance().scheduler().platform().runRepeating(() -> {
-                CraftEngine.instance().scheduler().async().execute(this::asyncTick);
-            }, 1, 1);
+            this.asyncTickTask = CraftEngine.instance().scheduler().platform().runAsyncRepeating(this::asyncTick, 1, 1);
     }
 
     @Override
@@ -176,7 +176,12 @@ public abstract class AbstractFurnitureManager implements FurnitureManager {
     protected abstract FurnitureHitBoxConfig<?> defaultHitBox();
 
     private final class FurnitureParser extends IdSectionConfigParser {
-        public static final String[] CONFIG_SECTION_NAME = new String[] { "furniture" };
+        public static final String[] CONFIG_SECTION_NAME = ConfigKeys.of("furniture");
+
+        @Override
+        public Key type() {
+            return Key.ce("furniture");
+        }
 
         @Override
         public String[] sectionId() {
@@ -203,16 +208,16 @@ public abstract class AbstractFurnitureManager implements FurnitureManager {
             return List.of(LoadingStages.ITEM);
         }
 
-        private static final String[] VARIANT = new String[] {"variant", "variants", "placement"};
-        private static final String[] LOOT_SPAWN_OFFSET = new String[] {"loot_spawn_offset", "loot-spawn-offset"};
-        private static final String[] BLUEPRINT = new String[] {"blueprint", "better-model", "model-engine"};
-        private static final String[] ENTITY_CULLING = new String[] {"entity_culling", "entity-culling"};
-        private static final String[] EVENT = new String[] {"events", "event"};
-        private static final String[] LOOT = new String[] {"loots", "loot"};
-        private static final String[] BEHAVIORS = new String[] {"behaviors", "behavior"};
-        private static final String[] VIEW_DISTANCE = new String[] {"view_distance", "view-distance"};
-        private static final String[] AABB_EXPANSION = new String[] {"aabb_expansion", "aabb-expansion"};
-        private static final String[] RAY_TRACING = new String[] {"ray_tracing", "ray-tracing"};
+        private static final String[] VARIANT = ConfigKeys.of("variant(s)|placement");
+        private static final String[] LOOT_SPAWN_OFFSET = ConfigKeys.of("loot_spawn_offset");
+        private static final String[] BLUEPRINT = ConfigKeys.of("blueprint|better_model|model_engine");
+        private static final String[] ENTITY_CULLING = ConfigKeys.of("entity_culling");
+        private static final String[] EVENT = ConfigKeys.of("event(s)");
+        private static final String[] LOOT = ConfigKeys.of("loot(s)");
+        private static final String[] BEHAVIORS = ConfigKeys.of("behavior(s)");
+        private static final String[] VIEW_DISTANCE = ConfigKeys.of("view_distance");
+        private static final String[] AABB_EXPANSION = ConfigKeys.of("aabb_expansion");
+        private static final String[] RAY_TRACING = ConfigKeys.of("ray_tracing");
 
         @Override
         public void parseSection(@NotNull Pack pack, @NotNull Path path, @NotNull Key id, @NotNull ConfigSection section) {
@@ -261,9 +266,10 @@ public abstract class AbstractFurnitureManager implements FurnitureManager {
             }
 
             // 解析事件 （可异常）
-            Map<EventTrigger, List<Function<Context>>> events = new EnumMap<>(EventTrigger.class);
+            Map<EventTrigger, List<Function<Context>>> events = new HashMap<>();
             try {
-                CommonFunctions.parseEvents(section.getValue(EVENT), (t, f) -> events.computeIfAbsent(t, k -> new ArrayList<>()).add(f));
+                CommonFunctions.parseEvents(section.getValue(EVENT), EVENT_TRIGGER_RESOLVER,
+                        (t, f) -> events.computeIfAbsent(t, k -> new ArrayList<>()).add(f));
             } catch (KnownResourceException e) {
                 error(e, path);
             }

@@ -6,11 +6,14 @@ import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.behavior.ItemBehavior;
 import net.momirealms.craftengine.core.item.behavior.ItemBehaviorFactory;
 import net.momirealms.craftengine.core.pack.Pack;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.plugin.config.ConfigValue;
 import net.momirealms.craftengine.core.plugin.context.CommonConditions;
+import net.momirealms.craftengine.core.plugin.context.ContextHolder;
 import net.momirealms.craftengine.core.plugin.context.PlayerContext;
 import net.momirealms.craftengine.core.plugin.context.PlayerOptionalContext;
+import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
 import net.momirealms.craftengine.core.util.Direction;
 import net.momirealms.craftengine.core.util.Key;
 import net.momirealms.craftengine.core.util.MiscUtils;
@@ -43,11 +46,14 @@ public final class RangeMiningItemBehavior extends ItemBehavior {
         BukkitServerPlayer serverPlayer = (BukkitServerPlayer) player;
         if (serverPlayer.isRangeMining()) return;
 
-        if (!this.condition.test(PlayerOptionalContext.of(player))) {
+        BlockStateWrapper blockState = world.getBlockState(pos);
+        if (!this.condition.test(PlayerOptionalContext.of(player, ContextHolder.builder(
+                DirectContextParameters.PLAYER, player,
+                DirectContextParameters.BLOCK, world.getBlock(pos)
+        ).build()))) {
             return;
         }
 
-        BlockStateWrapper blockState = world.getBlockState(pos);
         float destroyProgress = player.getDestroyProgress(blockState.minecraftState(), pos);
 
         // 获取水平朝向 (North, South, East, West)
@@ -140,7 +146,7 @@ public final class RangeMiningItemBehavior extends ItemBehavior {
     }
 
     private static class Factory implements ItemBehaviorFactory<RangeMiningItemBehavior> {
-        private static final String[] CONDITIONS = new String[]{"conditions", "condition"};
+        private static final String[] CONDITIONS = ConfigKeys.of("condition(s)");
 
         @Override
         public RangeMiningItemBehavior create(Pack pack, Path path, Key key, ConfigSection section) {

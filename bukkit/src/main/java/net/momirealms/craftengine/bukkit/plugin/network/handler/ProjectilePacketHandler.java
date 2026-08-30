@@ -14,10 +14,8 @@ import net.momirealms.craftengine.core.util.FriendlyByteBuf;
 import net.momirealms.craftengine.core.util.MiscUtils;
 import net.momirealms.craftengine.core.util.VersionHelper;
 import net.momirealms.craftengine.core.world.Vec3d;
-import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundAddEntityPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundSetEntityDataPacketProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypeProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.phys.Vec3Proxy;
+import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypesProxy;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -98,29 +96,38 @@ public final class ProjectilePacketHandler implements EntityPacketHandler {
         int xa = VersionHelper.isOrAbove1_21_9 ? -1 : buf.readShort();
         int ya = VersionHelper.isOrAbove1_21_9 ? -1 : buf.readShort();
         int za = VersionHelper.isOrAbove1_21_9 ? -1 : buf.readShort();
-        event.setCancelled(true);
-        user.sendPackets(List.of(
-                ClientboundAddEntityPacketProxy.INSTANCE.newInstance(this.entityId, uuid, x, y, z,
-                        MiscUtils.clamp(-MiscUtils.unpackDegrees(xRot), -90.0F, 90.0F),
-                        -MiscUtils.unpackDegrees(yRot),
-                        EntityTypeProxy.ITEM_DISPLAY,
-                        data,
-                        movement != null ? Vec3Proxy.INSTANCE.newInstance(movement.x, movement.y, movement.z) : Vec3Proxy.INSTANCE.newInstance((double) xa / 8000.0, (double) ya / 8000.0, (double) za / 8000.0),
-                        MiscUtils.unpackDegrees(yHeadRot)
-                ),
-                ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(entityId, this.createCustomProjectileEntityDataValues((Player) user))
-        ), false);
+        event.setChanged(true);
+        buf.clear();
+        buf.writeVarInt(event.packetID());
+        buf.writeVarInt(this.entityId);
+        buf.writeUUID(uuid);
+        buf.writeVarInt(EntityTypesProxy.ITEM_DISPLAY$registryId);
+        buf.writeDouble(x);
+        buf.writeDouble(y);
+        buf.writeDouble(z);
+        if (VersionHelper.isOrAbove1_21_9) buf.writeLpVec3(movement);
+        buf.writeByte(MiscUtils.packDegrees(MiscUtils.clamp(-MiscUtils.unpackDegrees(xRot), -90.0F, 90.0F)));
+        buf.writeByte(MiscUtils.packDegrees(-MiscUtils.unpackDegrees(yRot)));
+        buf.writeByte(yHeadRot);
+        buf.writeVarInt(data);
+        if (!VersionHelper.isOrAbove1_21_9) {
+            buf.writeShort(xa);
+            buf.writeShort(ya);
+            buf.writeShort(za);
+        }
+        user.sendPacket(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, new ArrayList<>(4)), false);
     }
 
     public List<Object> createCustomProjectileEntityDataValues(Player player) {
         List<Object> itemDisplayValues = new ArrayList<>();
-        Item displayedItem = BukkitItemManager.instance().createWrappedItem(this.display.item(), player);
+        Item displayedItem = Item.byId(this.display.item(), player);
         if (displayedItem == null) return itemDisplayValues;
         displayedItem = BukkitItemManager.instance().s2c(displayedItem, player).orElse(displayedItem);
 
         // 我们应当使用新的展示物品的组件覆盖原物品的组件，以完成附魔，附魔光效等组件的继承.
         Item item = this.projectile.item();
         item.enchantments().ifPresent(displayedItem::setEnchantments);
+        item.trim().ifPresent(displayedItem::trim);
         if (VersionHelper.isOrAbove1_20_5) {
             Optional<Boolean> glint = item.glint();
             if (glint.isPresent()) {

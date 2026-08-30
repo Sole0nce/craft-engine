@@ -5,6 +5,7 @@ import net.momirealms.craftengine.proxy.minecraft.core.RegistryProxy;
 import net.momirealms.craftengine.proxy.minecraft.core.component.DataComponentHolderProxy;
 import net.momirealms.craftengine.proxy.minecraft.core.component.DataComponentPatchProxy;
 import net.momirealms.craftengine.proxy.minecraft.core.component.DataComponentTypeProxy;
+import net.momirealms.craftengine.proxy.minecraft.core.component.PatchedDataComponentMapProxy;
 import net.momirealms.craftengine.proxy.minecraft.nbt.CompoundTagProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.codec.StreamCodecProxy;
 import net.momirealms.craftengine.proxy.minecraft.tags.TagKeyProxy;
@@ -38,6 +39,9 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
     @FieldGetter(name = "OPTIONAL_STREAM_CODEC", isStatic = true, activeIf = "min_version=1.20.5")
     Object getOptionalStreamCodec();
 
+    @FieldGetter(name = "OPTIONAL_UNTRUSTED_STREAM_CODEC", isStatic = true, activeIf = "min_version=1.21.5")
+    Object getOptionalUntrustedStreamCodec();
+
     @MethodInvoker(name = "hurtAndBreak", activeIf = "min_version=1.20.5")
     void hurtAndBreak(Object target, int amount, @Type(clazz = LivingEntityProxy.class) Object entity, @Type(clazz = EquipmentSlotProxy.class) Object slot);
 
@@ -53,7 +57,7 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
     @MethodInvoker(name = "setCount")
     void setCount(Object target, int count);
 
-    @MethodInvoker(name = "getBukkitStack")
+    @MethodInvoker(name = "getBukkitStack", activeIf = "has_patch=paper")
     ItemStack getBukkitStack(Object target);
 
     @MethodInvoker(name = "copyWithCount")
@@ -101,6 +105,9 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
     @MethodInvoker(name = "getComponentsPatch", activeIf = "min_version=1.20.5")
     Object getComponentsPatch(Object target);
 
+    @FieldSetter(name = "components", activeIf = "min_version=1.20.5")
+    void setComponents(Object target, @Type(clazz = PatchedDataComponentMapProxy.class) Object components);
+
     @MethodInvoker(name = "transmuteCopy", activeIf = "min_version=1.20.5")
     Object transmuteCopy(Object target, @Type(clazz = ItemLikeProxy.class) Object item, int count);
 
@@ -130,4 +137,7 @@ public interface ItemStackProxy extends DataComponentHolderProxy, ItemInstancePr
 
     @MethodInvoker(name = "isSameItemSameComponents", isStatic = true, activeIf = "min_version=1.20.5")
     boolean isSameItemSameComponents(@Type(clazz = ItemStackProxy.class) Object stack, @Type(clazz = ItemStackProxy.class) Object otherStack);
+
+    @MethodInvoker(name = "isValidRepairItem", activeIf = "min_version=1.21.2")
+    boolean isValidRepairItem(Object target, @Type(clazz = ItemStackProxy.class) Object repairItem);
 }

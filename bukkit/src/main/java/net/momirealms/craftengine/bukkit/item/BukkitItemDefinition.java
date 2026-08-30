@@ -4,6 +4,7 @@ import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.util.ItemStackUtils;
 import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.AbstractItemDefinition;
+import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.item.ItemBuildContext;
 import net.momirealms.craftengine.core.item.ItemDefinition;
 import net.momirealms.craftengine.core.item.behavior.ItemBehavior;
@@ -20,7 +21,7 @@ import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
-import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -42,11 +43,12 @@ public final class BukkitItemDefinition extends AbstractItemDefinition {
     @Override
     public BukkitItem buildItem(ItemBuildContext context, int count) {
         ItemStack item = ItemStackUtils.getBukkitStack(ItemStackProxy.INSTANCE.newInstance(this.item, count));
-        BukkitItem wrapped = BukkitItemManager.instance().wrap(item);
+        Item wrapped = BukkitItemManager.instance().wrap(item);
+        context.setItem(wrapped);
         for (ItemProcessor modifier : processors()) {
-            modifier.apply(wrapped, context);
+            modifier.apply(context);
         }
-        return wrapped;
+        return (BukkitItem) context.item();
     }
 
     @Override
@@ -102,7 +104,7 @@ public final class BukkitItemDefinition extends AbstractItemDefinition {
         private final Object item;
         private Key clientBoundItemKey;
         private final Object clientBoundItem;
-        private final Map<EventTrigger, List<Function<Context>>> events = new EnumMap<>(EventTrigger.class);
+        private final Map<EventTrigger, List<Function<Context>>> events = new HashMap<>();
         private ItemBehavior behavior;
         private final List<ItemProcessor> processors = new ArrayList<>(4);
         private final List<ItemProcessor> clientBoundProcessors = new ArrayList<>(4);

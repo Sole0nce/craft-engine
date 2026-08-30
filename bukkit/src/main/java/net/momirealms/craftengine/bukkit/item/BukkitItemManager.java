@@ -1,16 +1,16 @@
 package net.momirealms.craftengine.bukkit.item;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.Scheduler;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
-import net.momirealms.craftengine.bukkit.item.behavior.AxeItemBehavior;
 import net.momirealms.craftengine.bukkit.item.behavior.FlintAndSteelItemBehavior;
 import net.momirealms.craftengine.bukkit.item.factory.BukkitItemFactory;
-import net.momirealms.craftengine.bukkit.item.listener.ArmorEventListener;
-import net.momirealms.craftengine.bukkit.item.listener.ItemEventListener;
-import net.momirealms.craftengine.bukkit.item.listener.SlotChangeListener;
+import net.momirealms.craftengine.bukkit.item.listener.*;
 import net.momirealms.craftengine.bukkit.item.recipe.BukkitRecipeManager;
 import net.momirealms.craftengine.bukkit.plugin.BukkitCraftEngine;
 import net.momirealms.craftengine.bukkit.plugin.command.feature.ReloadCommand;
@@ -23,14 +23,16 @@ import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.*;
 import net.momirealms.craftengine.core.item.component.DataComponentKeys;
 import net.momirealms.craftengine.core.item.network.NetworkItemHandler;
+import net.momirealms.craftengine.core.item.processor.ItemProcessor;
 import net.momirealms.craftengine.core.item.processor.ObfuscatedItemModelProcessor;
 import net.momirealms.craftengine.core.item.recipe.DatapackRecipeResult;
 import net.momirealms.craftengine.core.item.recipe.IngredientUnlockable;
 import net.momirealms.craftengine.core.pack.AbstractPackManager;
-import net.momirealms.craftengine.core.plugin.CraftEngine;
 import net.momirealms.craftengine.core.plugin.compatibility.ItemSource;
 import net.momirealms.craftengine.core.plugin.config.Config;
 import net.momirealms.craftengine.core.plugin.config.KnownResourceException;
+import net.momirealms.craftengine.core.plugin.context.ContextHolder;
+import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
 import net.momirealms.craftengine.core.plugin.network.mod.protocol.ClientboundCreativeModeTabItemsPacket;
 import net.momirealms.craftengine.core.util.*;
 import net.momirealms.craftengine.proxy.minecraft.core.HolderProxy;
@@ -41,6 +43,7 @@ import net.momirealms.craftengine.proxy.minecraft.core.registries.RegistriesProx
 import net.momirealms.craftengine.proxy.minecraft.network.chat.ComponentProxy;
 import net.momirealms.craftengine.proxy.minecraft.resources.ResourceKeyProxy;
 import net.momirealms.craftengine.proxy.minecraft.tags.TagKeyProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.item.ItemProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.ItemStackProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.ItemsProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.ProjectileWeaponItemProxy;
@@ -56,13 +59,15 @@ import org.jetbrains.annotations.Nullable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @SuppressWarnings("unchecked")
 public final class BukkitItemManager extends AbstractItemManager {
     static {
         registerVanillaItemExtraBehavior(FlintAndSteelItemBehavior.INSTANCE, ItemKeys.FLINT_AND_STEEL);
-        registerVanillaItemExtraBehavior(AxeItemBehavior.INSTANCE, ItemKeys.AXES);
     }
 
     private static BukkitItemManager instance;
@@ -70,10 +75,14 @@ public final class BukkitItemManager extends AbstractItemManager {
     private final BukkitCraftEngine plugin;
     private final ItemEventListener itemEventListener;
     private final ArmorEventListener armorEventListener;
-    private final SlotChangeListener slotChangeListener;
+    private final PreventBreakListener preventBreakListener;
+    private final PaperSlotChangeListener slotChangeListener;
+    private final PaperItemEventListener paperItemEventListener;
     private final NetworkItemHandler networkItemHandler;
     private final Object bedrockItemHolder;
     private final BukkitItem emptyItem;
+    private final Cache<ByteArrayKey, BukkitItem> deserializedItemCache;
+    private final Map<Object, Object> originalVanillaItemComponents = new ConcurrentHashMap<>();
     private Set<Key> lastRegisteredPatterns = Set.of();
     private boolean hasExternalRecipeSource = false;
     private ItemSource[] recipeIngredientSources = null;
@@ -85,7 +94,9 @@ public final class BukkitItemManager extends AbstractItemManager {
         this.factory = BukkitItemFactory.create(plugin);
         this.itemEventListener = new ItemEventListener(plugin, this);
         this.armorEventListener = new ArmorEventListener();
-        this.slotChangeListener = VersionHelper.isOrAbove1_20_3 ? new SlotChangeListener(this) : null;
+        this.preventBreakListener = new PreventBreakListener(this);
+        this.slotChangeListener = VersionHelper.isOrAbove1_20_3 && VersionHelper.hasPaperPatch ? new PaperSlotChangeListener(this) : null;
+        this.paperItemEventListener = VersionHelper.hasPaperPatch ? new PaperItemEventListener() : null;
         this.networkItemHandler = VersionHelper.isOrAbove1_20_5 ? new ModernNetworkItemHandler(this) : new LegacyNetworkItemHandler();
         this.registerAllVanillaItems();
         this.bedrockItemHolder = Objects.requireNonNull(RegistryUtils.getHolder(BuiltInRegistriesProxy.ITEM, ResourceKeyProxy.INSTANCE.create(RegistriesProxy.ITEM, KeyUtils.toIdentifier(Key.of("minecraft:bedrock")))));
@@ -93,11 +104,28 @@ public final class BukkitItemManager extends AbstractItemManager {
         this.loadLastRegisteredPatterns();
         this.loadItemModelMappings();
         this.emptyItem = wrap(ItemStackProxy.EMPTY);
+        this.deserializedItemCache = Caffeine.newBuilder()
+                .maximumSize(2048)
+                .expireAfterAccess(Duration.of(20, ChronoUnit.MINUTES))
+                .scheduler(Scheduler.systemScheduler())
+                .executor(this.plugin.scheduler().async())
+                .build();
     }
 
     @Override
     public void delayedLoad() {
         super.delayedLoad();
+        this.resetItemProviders();
+        if (!ReloadCommand.RELOAD_PACK_FLAG || !Config.obfuscateItemModel()) {
+            for (Player player : this.plugin.networkManager().onlineUsers()) {
+                if (!player.hasClientMod()) continue;
+                player.sendCustomPackets(ClientboundCreativeModeTabItemsPacket.create(player));
+            }
+        }
+    }
+
+    @Override
+    public void resetItemProviders() {
         List<ItemSource> sources = new ArrayList<>();
         for (String externalSource : Config.recipeIngredientSources()) {
             String sourceId = externalSource.toLowerCase(Locale.ENGLISH);
@@ -112,12 +140,6 @@ public final class BukkitItemManager extends AbstractItemManager {
         } else {
             this.recipeIngredientSources = sources.toArray(new ItemSource[0]);
             this.hasExternalRecipeSource = true;
-        }
-        if (!ReloadCommand.RELOAD_PACK_FLAG || !Config.obfuscateItemModel()) {
-            for (Player player : CraftEngine.instance().networkManager().onlineUsers()) {
-                if (!player.hasClientMod()) continue;
-                player.sendCustomPackets(ClientboundCreativeModeTabItemsPacket.create(player));
-            }
         }
     }
 
@@ -142,6 +164,7 @@ public final class BukkitItemManager extends AbstractItemManager {
         Bukkit.getPluginManager().registerEvents(this.itemEventListener, this.plugin.javaPlugin());
         Bukkit.getPluginManager().registerEvents(this.armorEventListener, this.plugin.javaPlugin());
         if (this.slotChangeListener != null) Bukkit.getPluginManager().registerEvents(this.slotChangeListener, this.plugin.javaPlugin());
+        if (this.paperItemEventListener != null)  Bukkit.getPluginManager().registerEvents(this.paperItemEventListener, this.plugin.javaPlugin());
         this.injectProjectilePredicate();
     }
 
@@ -174,12 +197,12 @@ public final class BukkitItemManager extends AbstractItemManager {
     }
 
     public Optional<ItemStack> s2c(ItemStack item, Player player) {
-        if (item.isEmpty()) return Optional.empty();
+        if (ItemStackUtils.isEmpty(item)) return Optional.empty();
         return this.networkItemHandler.s2c(wrap(item), player).map(ItemStackUtils::getBukkitStack);
     }
 
     public Optional<ItemStack> c2s(ItemStack item) {
-        if (item.isEmpty()) return Optional.empty();
+        if (ItemStackUtils.isEmpty(item)) return Optional.empty();
         return this.networkItemHandler.c2s(wrap(item)).map(ItemStackUtils::getBukkitStack);
     }
 
@@ -213,11 +236,82 @@ public final class BukkitItemManager extends AbstractItemManager {
     }
 
     @Override
+    public void runDelayedSyncTasks() {
+        this.reloadVanillaItemDataOverrides();
+        if (this.featureFlag$preventBreak()) {
+            this.preventBreakListener.register(this.plugin.javaPlugin());
+        } else {
+            this.preventBreakListener.unregister();
+        }
+    }
+
+    @Override
     public void disable() {
+        this.restoreVanillaItemComponents();
         this.unload();
         HandlerList.unregisterAll(this.itemEventListener);
         HandlerList.unregisterAll(this.armorEventListener);
+        this.preventBreakListener.unregister();
         if (this.slotChangeListener != null) HandlerList.unregisterAll(this.slotChangeListener);
+        if (this.paperItemEventListener != null) HandlerList.unregisterAll(this.paperItemEventListener);
+    }
+
+    public void reloadVanillaItemDataOverrides() {
+        if (!VersionHelper.isOrAbove1_20_5) return;
+        this.restoreVanillaItemComponents();
+        this.applyVanillaItemDataOverrides();
+    }
+
+    private void applyVanillaItemDataOverrides() {
+        for (Map.Entry<Key, List<ItemProcessor>> entry : this.vanillaItemDataOverrides.entrySet()) {
+            Key id = entry.getKey();
+            Object item = RegistryUtils.getRegistryValue(BuiltInRegistriesProxy.ITEM, KeyUtils.toIdentifier(id));
+            if (item == null || item == ItemsProxy.AIR) continue;
+            try {
+                Object originalComponents = ItemProxy.INSTANCE.components(item);
+                Object itemStack = ItemStackProxy.INSTANCE.newInstance(item, 1);
+                BukkitItem wrapped = this.wrap(itemStack);
+                ItemBuildContext context = ItemBuildContext.of(null, wrapped, ContextHolder.builder()
+                        .withParameter(DirectContextParameters.ITEM, wrapped)
+                        .build());
+                for (ItemProcessor processor : entry.getValue()) {
+                    processor.apply(context);
+                }
+                Object overriddenComponents = ItemStackProxy.INSTANCE.getComponents(context.item().minecraftItem());
+                this.originalVanillaItemComponents.putIfAbsent(item, originalComponents);
+                this.setVanillaItemComponents(item, overriddenComponents);
+            } catch (Throwable throwable) {
+                this.plugin.logger().warn("Failed to apply override_data to vanilla item '" + id.asString() + "'", throwable);
+            }
+        }
+    }
+
+    private void restoreVanillaItemComponents() {
+        if (!VersionHelper.isOrAbove1_20_5) return;
+        Iterator<Map.Entry<Object, Object>> iterator = this.originalVanillaItemComponents.entrySet().iterator();
+        while (iterator.hasNext()) {
+            Map.Entry<Object, Object> entry = iterator.next();
+            try {
+                this.setVanillaItemComponents(entry.getKey(), entry.getValue());
+                iterator.remove();
+            } catch (Throwable throwable) {
+                this.plugin.logger().warn("Failed to restore the default components of a vanilla item", throwable);
+            }
+        }
+    }
+
+    private void setVanillaItemComponents(Object item, Object components) {
+        if (VersionHelper.isOrAbove26_1) {
+            Object holder = ItemProxy.INSTANCE.getBuiltInRegistryHolder(item);
+            HolderProxy.ReferenceProxy.INSTANCE.bindComponents(holder, components);
+        } else {
+            ItemProxy.INSTANCE.setComponents(item, components);
+        }
+    }
+
+    @Nullable
+    Object originalVanillaItemComponents(Object item) {
+        return this.originalVanillaItemComponents.get(item);
     }
 
     @Override
@@ -364,10 +458,31 @@ public final class BukkitItemManager extends AbstractItemManager {
         }
     }
 
-    @SuppressWarnings("deprecation")
     @Override
     public BukkitItem fromBytes(byte[] bytes) {
-        return wrap(Bukkit.getUnsafe().deserializeItem(bytes));
+        return fromBytes(bytes, true);
+    }
+
+    @Override
+    public BukkitItem fromBytes(byte[] bytes, boolean useCache) {
+        if (!useCache) {
+            return wrap(ItemStackUtils.fromBytes(bytes));
+        }
+        // 反序列化（解压 + DataFixer + codec 解析）很贵，而家具等场景会反复加载相同字节
+        BukkitItem template = this.deserializedItemCache.get(new ByteArrayKey(bytes), key -> wrap(ItemStackUtils.fromBytes(key.bytes())));
+        return (BukkitItem) template.copy();
+    }
+
+    private record ByteArrayKey(byte[] bytes) {
+        @Override
+        public boolean equals(Object o) {
+            return o instanceof ByteArrayKey other && Arrays.equals(this.bytes, other.bytes());
+        }
+
+        @Override
+        public int hashCode() {
+            return Arrays.hashCode(this.bytes);
+        }
     }
 
     @Override
@@ -375,11 +490,13 @@ public final class BukkitItemManager extends AbstractItemManager {
         return wrap(ItemStackUtils.parseMinecraftItem(tag, VersionHelper.WORLD_VERSION));
     }
 
+    @Deprecated
     @Override
     public BukkitItem createCustomWrappedItem(Key id, Player player) {
         return Optional.ofNullable(itemDefinitionById.get(id)).map(it -> (BukkitItem) it.buildItem(player)).orElse(null);
     }
 
+    @Deprecated
     @Override
     public BukkitItem createWrappedItem(Key id, @Nullable Player player) {
         ItemDefinition itemDefinition = this.itemDefinitionById.get(id);
@@ -408,6 +525,20 @@ public final class BukkitItemManager extends AbstractItemManager {
         return new BukkitItem((ItemFactory<BukkitItemWrapper>) this.factory, this.factory.wrap(itemStack));
     }
 
+    public boolean isBrokenItem(@Nullable ItemStack itemStack) {
+        if (ItemStackUtils.isEmpty(itemStack)) return false;
+        return isBrokenItem(wrap(itemStack));
+    }
+
+    public boolean isBrokenItem(Item item) {
+        Optional<ItemDefinition> optionalCustomItem = item.getDefinition();
+        if (optionalCustomItem.isEmpty()) return false;
+        if (!optionalCustomItem.get().settings().preventBreak()) return false;
+        int maxDamage = item.maxDamage();
+        if (maxDamage <= 0) return false;
+        return item.damage().orElse(0) >= maxDamage - 1;
+    }
+
     @Override
     protected ItemDefinition.Builder createPlatformItemBuilder(String path, UniqueKey id, Key materialId, Key clientBoundMaterialId) {
         Object item = RegistryUtils.getRegistryValue(BuiltInRegistriesProxy.ITEM, KeyUtils.toIdentifier(materialId));
@@ -425,9 +556,13 @@ public final class BukkitItemManager extends AbstractItemManager {
     }
 
     private void registerAllVanillaItems() {
+        VANILLA_ITEMS.clear();
+        VANILLA_ITEM_TO_TAGS.clear();
+        VANILLA_TAG_TO_ITEMS.clear();
         for (Object item : (Iterable<?>) BuiltInRegistriesProxy.ITEM) {
             Object identifier = RegistryProxy.INSTANCE.getKey(BuiltInRegistriesProxy.ITEM, item);
             Key itemKey = KeyUtils.identifierToKey(identifier);
+            VANILLA_ITEMS.add(itemKey);
 
             UniqueKey uniqueKey = UniqueKey.create(itemKey);
             Object mcHolder = Objects.requireNonNull(RegistryUtils.getHolder(BuiltInRegistriesProxy.ITEM, ResourceKeyProxy.INSTANCE.create(RegistriesProxy.ITEM, identifier)));

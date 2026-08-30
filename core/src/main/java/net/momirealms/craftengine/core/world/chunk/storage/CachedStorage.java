@@ -1,9 +1,6 @@
 package net.momirealms.craftengine.core.world.chunk.storage;
 
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.Scheduler;
-import net.momirealms.craftengine.core.plugin.CraftEngine;
+import net.momirealms.craftengine.core.util.ExpiringLong2ObjectCache;
 import net.momirealms.craftengine.core.world.CEWorld;
 import net.momirealms.craftengine.core.world.ChunkPos;
 import net.momirealms.craftengine.core.world.WorldSettings;
@@ -17,17 +14,40 @@ import java.io.IOException;
 import java.util.concurrent.TimeUnit;
 
 public final class CachedStorage<T extends WorldDataStorage> implements WorldDataStorage {
+    private static final int LOAD_LOCK_STRIPES = 256;
+
     private final T storage;
-    private final Cache<ChunkPos, CEChunk> chunkCache;
+    private final ExpiringLong2ObjectCache<CEChunk> chunkCache;
+    private final Object[] loadLocks;
 
     public CachedStorage(T storage) {
         this.storage = storage;
-        this.chunkCache = Caffeine.newBuilder()
-                .executor(CraftEngine.instance().scheduler().async())
-                .scheduler(Scheduler.systemScheduler())
-                .initialCapacity(4096)
-                .expireAfterAccess(60, TimeUnit.SECONDS)
-                .build();
+        this.chunkCache = new ExpiringLong2ObjectCache<>(30, TimeUnit.SECONDS, 4096);
+        this.loadLocks = new Object[LOAD_LOCK_STRIPES];
+        for (int i = 0; i < LOAD_LOCK_STRIPES; i++) {
+            this.loadLocks[i] = new Object();
+        }
+    }
+
+    private Object loadLock(long key) {
+        return this.loadLocks[Long.hashCode(key) & (LOAD_LOCK_STRIPES - 1)];
+    }
+
+    private @NotNull CEChunk loadChunkAt(@NotNull CEWorld world, @NotNull ChunkPos pos, @Nullable Chunk chunkAccess) throws IOException {
+        long key = pos.longKey;
+        CEChunk chunk = this.chunkCache.getIfPresent(key);
+        if (chunk != null) {
+            return chunk;
+        }
+        synchronized (this.loadLock(key)) {
+            chunk = this.chunkCache.getIfPresent(key);
+            if (chunk != null) {
+                return chunk;
+            }
+            chunk = this.storage.readChunkAt(world, pos, chunkAccess);
+            this.chunkCache.put(key, chunk);
+            return chunk;
+        }
     }
 
     @Override
@@ -47,13 +67,12 @@ public final class CachedStorage<T extends WorldDataStorage> implements WorldDat
 
     @Override
     public @NotNull CEChunk readChunkAt(@NotNull CEWorld world, @NotNull ChunkPos pos, @Nullable Chunk chunkAccess) throws IOException {
-        CEChunk chunk = this.chunkCache.getIfPresent(pos);
-        if (chunk != null) {
-            return chunk;
-        }
-        chunk = this.storage.readChunkAt(world, pos, chunkAccess);
-        this.chunkCache.put(pos, chunk);
-        return chunk;
+        return this.loadChunkAt(world, pos, chunkAccess);
+    }
+
+    @Override
+    public void preloadChunkAt(@NotNull CEWorld world, @NotNull ChunkPos pos, @Nullable Chunk chunkAccess) throws IOException {
+        this.loadChunkAt(world, pos, chunkAccess);
     }
 
     @Override
@@ -73,7 +92,7 @@ public final class CachedStorage<T extends WorldDataStorage> implements WorldDat
 
     @Override
     public void clearChunkAt(@NotNull ChunkPos pos) throws IOException {
-        this.chunkCache.invalidate(pos);
+        this.chunkCache.invalidate(pos.longKey);
         this.storage.clearChunkAt(pos);
     }
 

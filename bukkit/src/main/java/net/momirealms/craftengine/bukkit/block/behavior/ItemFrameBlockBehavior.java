@@ -5,7 +5,6 @@ import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.block.entity.ItemFrameBlockEntityController;
 import net.momirealms.craftengine.bukkit.plugin.BukkitCraftEngine;
 import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
-import net.momirealms.craftengine.bukkit.util.DirectionUtils;
 import net.momirealms.craftengine.bukkit.util.LocationUtils;
 import net.momirealms.craftengine.bukkit.world.BukkitWorld;
 import net.momirealms.craftengine.core.block.BlockDefinition;
@@ -20,6 +19,7 @@ import net.momirealms.craftengine.core.entity.player.InteractionResult;
 import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.plugin.config.ConfigValue;
 import net.momirealms.craftengine.core.sound.SoundData;
@@ -28,6 +28,7 @@ import net.momirealms.craftengine.core.util.ItemUtils;
 import net.momirealms.craftengine.core.world.BlockPos;
 import net.momirealms.craftengine.core.world.Vec3d;
 import net.momirealms.craftengine.core.world.World;
+import net.momirealms.craftengine.core.world.WorldPosition;
 import net.momirealms.craftengine.core.world.context.UseOnContext;
 import net.momirealms.craftengine.proxy.minecraft.world.level.LevelProxy;
 import org.bukkit.Location;
@@ -80,28 +81,22 @@ public final class ItemFrameBlockBehavior extends BukkitBlockBehavior implements
     }
 
     @Override
-    public int getSignal(Object thisBlock, Object[] args) {
-        return getSignal(args[0], args[1], args[2], args[3]);
+    public boolean hasAnalogOutputSignal(Object thisBlock, Object[] args) {
+        return true;
     }
 
     @Override
-    public int getDirectSignal(Object thisBlock, Object[] args) {
-        return getSignal(args[0], args[1], args[2], args[3]);
-    }
-
-    private int getSignal(Object blockState, Object blockAccess, Object pos, Object side) {
-        if (!LevelProxy.CLASS.isInstance(blockAccess)) {
+    public int getAnalogOutputSignal(Object thisBlock, Object[] args) {
+        Object level = args[1];
+        if (!LevelProxy.CLASS.isInstance(level)) {
             return 0;
         }
-        ImmutableBlockState state = BlockStateUtils.getOptionalCustomBlockState(blockState).orElse(null);
+        ImmutableBlockState state = BlockStateUtils.getOptionalCustomBlockState(args[0]).orElse(null);
         if (state == null) {
             return 0;
         }
-        if (state.get(this.directionProperty) != DirectionUtils.fromNMSDirection(side)) {
-            return 0;
-        }
-        BukkitWorld world = BukkitAdaptor.adapt(LevelProxy.INSTANCE.getWorld(blockAccess));
-        BlockEntity blockEntity = world.storageWorld().getBlockEntityAtIfLoaded(LocationUtils.fromBlockPos(pos));
+        BukkitWorld world = BukkitAdaptor.adapt(LevelProxy.INSTANCE.getWorld(level));
+        BlockEntity blockEntity = world.storageWorld().getBlockEntityAtIfLoaded(LocationUtils.fromBlockPos(args[2]));
         if (blockEntity == null) {
             return 0;
         }
@@ -114,8 +109,16 @@ public final class ItemFrameBlockBehavior extends BukkitBlockBehavior implements
     }
 
     @Override
-    public boolean isSignalSource(Object thisBlock, Object[] args) {
-        return true;
+    public void affectNeighborsAfterRemoval(Object thisBlock, Object[] args) {
+        LevelProxy.INSTANCE.updateNeighbourForOutputSignal(args[1], args[2], BlockStateUtils.getBlockOwner(args[0]));
+    }
+
+    @Override
+    public Item itemToPickup(World world, BlockPos pos, ImmutableBlockState state, Player player) {
+        BlockEntity blockEntity = world.storageWorld().getBlockEntityAtIfLoaded(pos);
+        if (blockEntity == null) return null;
+        Item item = blockEntity.controller.let(ItemFrameBlockEntityController.class, this.controllerId, ItemFrameBlockEntityController::item);
+        return ItemUtils.isEmpty(item) ? null : item.copy();
     }
 
     @Override
@@ -147,9 +150,14 @@ public final class ItemFrameBlockBehavior extends BukkitBlockBehavior implements
                     return InteractionResult.SUCCESS_AND_CANCEL;
                 }
                 itemFrame.updateItem(null); // 先取出来
-                if (!player.canInstabuild()) {
-                    player.setItemInHand(InteractionHand.MAIN_HAND, item); // 然后给玩家
-                }
+                BukkitCraftEngine.instance().compatibilityManager().logItemFrameTransaction(
+                        player,
+                        new WorldPosition(world, pos),
+                        state.get(this.directionProperty),
+                        item,
+                        null
+                );
+                player.setItemInHand(InteractionHand.MAIN_HAND, item); // 然后给玩家
                 playSound(world, pos, this.takeSound);
                 player.swingHand(context.getHand());
                 return InteractionResult.SUCCESS_AND_CANCEL;
@@ -162,6 +170,13 @@ public final class ItemFrameBlockBehavior extends BukkitBlockBehavior implements
                     item.shrink(1); // 先扣物品
                 }
                 itemFrame.updateItem(copied); // 然后放进去
+                BukkitCraftEngine.instance().compatibilityManager().logItemFrameTransaction(
+                        player,
+                        new WorldPosition(world, pos),
+                        state.get(this.directionProperty),
+                        null,
+                        copied
+                );
                 playSound(world, pos, this.putSound);
                 player.swingHand(context.getHand());
                 return InteractionResult.SUCCESS_AND_CANCEL;
@@ -178,8 +193,8 @@ public final class ItemFrameBlockBehavior extends BukkitBlockBehavior implements
     }
 
     private static class Factory implements BlockBehaviorFactory<ItemFrameBlockBehavior> {
-        private static final String[] RENDER_MAP_ITEM = new String[]{"render_map_item", "render-map-item"};
-        private static final String[] DATA_KEY = new String[] {"data_key", "data-key"};
+        private static final String[] RENDER_MAP_ITEM = ConfigKeys.of("render_map_item");
+        private static final String[] DATA_KEY = ConfigKeys.of("data_key");
 
         @Override
         public ItemFrameBlockBehavior create(BlockDefinition block, ConfigSection section) {

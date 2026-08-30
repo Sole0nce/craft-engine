@@ -1,5 +1,6 @@
 package net.momirealms.craftengine.proxy.minecraft.world.item;
 
+import net.momirealms.craftengine.proxy.minecraft.core.component.DataComponentMapProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.InteractionHandProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.entity.player.PlayerProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.item.context.UseOnContextProxy;
@@ -31,9 +32,15 @@ public interface ItemProxy {
     @MethodInvoker(name = "components", activeIf = "min_version=1.20.5")
     Iterable<Object> components(Object target);
 
+    @FieldSetter(name = "components", activeIf = "min_version=1.20.5 && max_version=1.21.11")
+    void setComponents(Object target, @Type(clazz = DataComponentMapProxy.class) Object components);
+
     @MethodInvoker(name = "use")
     Object use(Object target, @Type(clazz = LevelProxy.class) Object level, @Type(clazz = PlayerProxy.class) Object player, @Type(clazz = InteractionHandProxy.class) Object hand);
 
     @MethodInvoker(name = "useOn")
     Object useOn(Object target, @Type(clazz = UseOnContextProxy.class) Object context);
+
+    @MethodInvoker(name = "getDescriptionId")
+    String getDescriptionId(Object target);
 }

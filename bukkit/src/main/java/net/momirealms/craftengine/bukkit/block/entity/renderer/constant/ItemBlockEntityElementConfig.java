@@ -1,7 +1,6 @@
 package net.momirealms.craftengine.bukkit.block.entity.renderer.constant;
 
 import net.momirealms.craftengine.bukkit.entity.data.item.ItemEntityData;
-import net.momirealms.craftengine.bukkit.item.BukkitItemManager;
 import net.momirealms.craftengine.core.block.entity.render.element.BlockEntityElementConfig;
 import net.momirealms.craftengine.core.block.entity.render.element.BlockEntityElementConfigFactory;
 import net.momirealms.craftengine.core.block.entity.render.tint.BlockEntityTintSource;
@@ -11,6 +10,7 @@ import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.item.ItemKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.plugin.context.CommonConditions;
 import net.momirealms.craftengine.core.plugin.context.Condition;
@@ -48,9 +48,9 @@ public final class ItemBlockEntityElementConfig implements BlockEntityElementCon
         this.predicate = predicate;
         this.lazyMetadataPacket = (player, ts) -> {
             List<Object> dataValues = new ArrayList<>();
-            Item wrappedItem = BukkitItemManager.instance().createWrappedItem(itemId, player);
+            Item wrappedItem = Item.byId(itemId, player);
             if (wrappedItem == null) {
-                wrappedItem = Objects.requireNonNull(BukkitItemManager.instance().createWrappedItem(ItemKeys.BARRIER, player));
+                wrappedItem = Objects.requireNonNull(Item.byId(ItemKeys.BARRIER, player));
             }
             if (ts != null) {
                 ts.applyTint(wrappedItem);
@@ -108,11 +108,11 @@ public final class ItemBlockEntityElementConfig implements BlockEntityElementCon
     }
 
     private static class Factory implements BlockEntityElementConfigFactory<ItemBlockEntityElement> {
-        private static final String[] TINT_SOURCE = new String[] {"tint_source", "tint-source"};
+        private static final String[] TINT_SOURCE = ConfigKeys.of("tint_source");
 
         @Override
         public ItemBlockEntityElementConfig create(ConfigSection section) {
-            List<Condition<PlayerContext>> conditions = section.getSectionList("conditions", CommonConditions::fromConfig);
+            List<Condition<PlayerContext>> conditions = section.getSectionList(ConfigKeys.of("condition(s)"), CommonConditions::fromConfig);
             return new ItemBlockEntityElementConfig(
                     section.getNonNullIdentifier("item"),
                     section.getVector3f("position", ConfigConstants.CENTER_VECTOR3),

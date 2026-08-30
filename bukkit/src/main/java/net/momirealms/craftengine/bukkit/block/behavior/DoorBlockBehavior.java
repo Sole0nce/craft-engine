@@ -20,6 +20,7 @@ import net.momirealms.craftengine.core.entity.player.InteractionHand;
 import net.momirealms.craftengine.core.entity.player.InteractionResult;
 import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.Item;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.sound.SoundData;
 import net.momirealms.craftengine.core.util.Direction;
@@ -271,7 +272,7 @@ public final class DoorBlockBehavior extends AbstractCanSurviveBlockBehavior
         if (isOpen(state) != isOpen) {
             org.bukkit.World world = LevelProxy.INSTANCE.getWorld(serverLevel);
             LevelWriterProxy.INSTANCE.setBlock(serverLevel, LocationUtils.toBlockPos(pos), state.with(this.openProperty, isOpen).customBlockState().minecraftState(), UPDATE_CLIENTS | UPDATE_IMMEDIATE);
-            world.sendGameEvent(player == null ? null : (org.bukkit.entity.Player) player.platformPlayer(), isOpen ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE, new Vector(pos.x(), pos.y(), pos.z()));
+            LevelUtils.sendGameEvent(world, player == null ? null : (org.bukkit.entity.Player) player.platformPlayer(), isOpen ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE, new Vector(pos.x(), pos.y(), pos.z()));
             SoundData soundData = isOpen ? this.openSound : this.closeSound;
             if (soundData != null) {
                 BukkitAdaptor.adapt(world).playBlockSound(
@@ -332,7 +333,7 @@ public final class DoorBlockBehavior extends AbstractCanSurviveBlockBehavior
             boolean flag = event.getNewCurrent() > 0;
             if (flag != customState.get(this.openProperty)) {
                 org.bukkit.World world = LevelProxy.INSTANCE.getWorld(level);
-                world.sendGameEvent(null, flag ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE, new Vector(bukkitBlock.getX(), bukkitBlock.getY(), bukkitBlock.getZ()));
+                LevelUtils.sendGameEvent(world, null, flag ? GameEvent.BLOCK_OPEN : GameEvent.BLOCK_CLOSE, new Vector(bukkitBlock.getX(), bukkitBlock.getY(), bukkitBlock.getZ()));
                 SoundData soundData = flag ? this.openSound : this.closeSound;
                 if (soundData != null) {
                     BukkitAdaptor.adapt(world).playBlockSound(
@@ -366,8 +367,8 @@ public final class DoorBlockBehavior extends AbstractCanSurviveBlockBehavior
     }
 
     private static class Factory implements BlockBehaviorFactory<DoorBlockBehavior> {
-        private static final String[] CAN_OPEN_WITH_HAND = new String[] {"can_open_with_hand", "can-open-with-hand"};
-        private static final String[] CAN_OPEN_BY_WIND_CHARGE = new String[] {"can_open_by_wind_charge", "can-open-by-wind-charge"};
+        private static final String[] CAN_OPEN_WITH_HAND = ConfigKeys.of("can_open_with_hand");
+        private static final String[] CAN_OPEN_BY_WIND_CHARGE = ConfigKeys.of("can_open_by_wind_charge");
 
         @Override
         public DoorBlockBehavior create(BlockDefinition block, ConfigSection section) {

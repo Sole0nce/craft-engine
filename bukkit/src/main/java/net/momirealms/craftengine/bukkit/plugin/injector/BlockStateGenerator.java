@@ -22,11 +22,12 @@ import net.momirealms.craftengine.bukkit.api.BukkitAdaptor;
 import net.momirealms.craftengine.bukkit.item.BukkitItemManager;
 import net.momirealms.craftengine.bukkit.loot.DatapackLootTable;
 import net.momirealms.craftengine.bukkit.plugin.user.BukkitServerPlayer;
+import net.momirealms.craftengine.bukkit.util.BlockStateUtils;
+import net.momirealms.craftengine.bukkit.util.EntityUtils;
 import net.momirealms.craftengine.bukkit.util.ItemStackUtils;
 import net.momirealms.craftengine.core.block.DelegatingBlockState;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
 import net.momirealms.craftengine.core.block.property.Property;
-import net.momirealms.craftengine.core.block.setting.BlockSettings;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.loot.Loot;
 import net.momirealms.craftengine.core.loot.LootTableReference;
@@ -38,7 +39,6 @@ import net.momirealms.craftengine.core.world.World;
 import net.momirealms.craftengine.core.world.WorldPosition;
 import net.momirealms.craftengine.proxy.minecraft.server.level.ServerPlayerProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.entity.player.PlayerProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.item.ItemStackProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.LevelProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.block.BlockProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.level.block.state.BlockStateProxy;
@@ -67,7 +67,7 @@ public final class BlockStateGenerator {
             .build();
 
     public static void init() {
-        ByteBuddy byteBuddy = new ByteBuddy(ClassFileVersion.JAVA_V17);
+        ByteBuddy byteBuddy = new ByteBuddy(ClassFileVersion.JAVA_V21);
         String packageWithName = BlockStateGenerator.class.getName();
         String generatedStateClassName = packageWithName.substring(0, packageWithName.lastIndexOf('.')) + ".CraftEngineBlockState";
         DynamicType.Builder<?> stateBuilder = byteBuddy
@@ -98,7 +98,7 @@ public final class BlockStateGenerator {
 
         constructor$CraftEngineBlockState = clazz$CraftEngineBlock.getSparrowConstructor(ConstructorMatcher.takeArguments(
                 BlockProxy.CLASS,
-                VersionHelper.isOrAbove26_1 ? PropertyProxy.CLASS.arrayType() : VersionHelper.isOrAbove1_20_5 ? Reference2ObjectArrayMap.class : ImmutableMap.class,
+                VersionHelper.isOrAbove26_1 ? PropertyProxy.CLASS.arrayType() : (VersionHelper.isOrAbove1_20_5 ? Reference2ObjectArrayMap.class : ImmutableMap.class),
                 VersionHelper.isOrAbove26_1 ? Comparable.class.arrayType() : MapCodec.class
         )).asm$3();
 
@@ -126,19 +126,12 @@ public final class BlockStateGenerator {
 
             Object tool = LootParamsProxy.BuilderProxy.INSTANCE.getOptionalParameter(builder, LootContextParamsProxy.TOOL);
             Item item = BukkitItemManager.instance().wrap(tool == null ? null : ItemStackUtils.getBukkitStack(tool));
-            Object optionalPlayer = LootParamsProxy.BuilderProxy.INSTANCE.getOptionalParameter(builder, LootContextParamsProxy.THIS_ENTITY);
-            if (!PlayerProxy.CLASS.isInstance(optionalPlayer)) {
-                optionalPlayer = null;
-            }
+            Object optionalEntity = LootParamsProxy.BuilderProxy.INSTANCE.getOptionalParameter(builder, LootContextParamsProxy.THIS_ENTITY);
+            Object optionalPlayer = PlayerProxy.CLASS.isInstance(optionalEntity) ? optionalEntity : null;
 
             // do not drop if it's not the correct tool
-            BlockSettings settings = state.settings();
-            if (optionalPlayer != null && settings.requireCorrectTool()) {
-                if (item.isEmpty()) return List.of();
-                if (!settings.isCorrectTool(item.id()) &&
-                        (!settings.respectToolComponent() || !ItemStackProxy.INSTANCE.isCorrectToolForDrops(tool, state.customBlockState().minecraftState()))) {
-                    return List.of();
-                }
+            if (optionalEntity != null && !BlockStateUtils.isCorrectTool(state, item)) {
+                return List.of();
             }
 
             // 数据包 LootTable.
@@ -155,8 +148,9 @@ public final class BlockStateGenerator {
             // 自定义 LootTable.
             Object serverLevel = LootParamsProxy.BuilderProxy.INSTANCE.getLevel(builder);
             World world = BukkitAdaptor.adapt(LevelProxy.INSTANCE.getWorld(serverLevel));
-            ContextHolder.Builder lootBuilder = new ContextHolder.Builder()
-                    .withParameter(DirectContextParameters.POSITION, new WorldPosition(world, Vec3Proxy.INSTANCE.getX(vec3), Vec3Proxy.INSTANCE.getY(vec3), Vec3Proxy.INSTANCE.getZ(vec3)));
+            ContextHolder.Builder lootBuilder = ContextHolder.builder()
+                    .withParameter(DirectContextParameters.POSITION, new WorldPosition(world, Vec3Proxy.INSTANCE.getX(vec3), Vec3Proxy.INSTANCE.getY(vec3), Vec3Proxy.INSTANCE.getZ(vec3)))
+                    .withParameter(DirectContextParameters.CUSTOM_BLOCK_STATE, state);
             if (!item.isEmpty()) {
                 lootBuilder.withParameter(DirectContextParameters.ITEM_IN_HAND, item);
             }
@@ -164,11 +158,14 @@ public final class BlockStateGenerator {
             if (player != null) {
                 lootBuilder.withParameter(DirectContextParameters.PLAYER, player);
             }
+            if (optionalEntity != null) {
+                lootBuilder.withParameter(DirectContextParameters.ENTITY, EntityUtils.adaptNMS(optionalEntity));
+            }
             Float radius = LootParamsProxy.BuilderProxy.INSTANCE.getOptionalParameter(builder, LootContextParamsProxy.EXPLOSION_RADIUS);
             if (radius != null) {
                 lootBuilder.withParameter(DirectContextParameters.EXPLOSION_RADIUS, radius);
             }
-            return state.getDrops(lootBuilder, world, player).stream().map(Item::minecraftItem).toList();
+            return state.getDrops(lootBuilder.build(), world, player).stream().map(Item::minecraftItem).toList();
         }
     }
 

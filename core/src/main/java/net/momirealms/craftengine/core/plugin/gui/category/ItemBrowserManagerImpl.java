@@ -4,28 +4,28 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
 import net.momirealms.craftengine.core.entity.player.Player;
-import net.momirealms.craftengine.core.item.AbstractItemManager;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.item.ItemBuildContext;
 import net.momirealms.craftengine.core.item.ItemKeys;
 import net.momirealms.craftengine.core.item.recipe.*;
 import net.momirealms.craftengine.core.pack.Pack;
 import net.momirealms.craftengine.core.plugin.CraftEngine;
-import net.momirealms.craftengine.core.plugin.config.ConfigParser;
-import net.momirealms.craftengine.core.plugin.config.ConfigSection;
-import net.momirealms.craftengine.core.plugin.config.IdSectionConfigParser;
+import net.momirealms.craftengine.core.plugin.config.*;
 import net.momirealms.craftengine.core.plugin.config.lifecycle.LoadingStage;
 import net.momirealms.craftengine.core.plugin.config.lifecycle.LoadingStages;
 import net.momirealms.craftengine.core.plugin.context.*;
+import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
 import net.momirealms.craftengine.core.plugin.gui.*;
 import net.momirealms.craftengine.core.plugin.gui.Ingredient;
+import net.momirealms.craftengine.core.plugin.gui.category.source.CategorySource;
+import net.momirealms.craftengine.core.plugin.gui.category.source.CategorySourceContext;
+import net.momirealms.craftengine.core.plugin.gui.category.source.CategorySources;
 import net.momirealms.craftengine.core.util.*;
 import org.jetbrains.annotations.NotNull;
 
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 
 @SuppressWarnings("DuplicatedCode")
 public final class ItemBrowserManagerImpl implements ItemBrowserManager {
@@ -103,7 +103,12 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
     }
 
     private final class CategoryParser extends IdSectionConfigParser {
-        public static final String[] CONFIG_SECTION_NAME = new String[] {"categories", "category"};
+        public static final String[] CONFIG_SECTION_NAME = ConfigKeys.of("categor(y|ies)");
+
+        @Override
+        public Key type() {
+            return Key.ce("category");
+        }
 
         @Override
         public String[] sectionId() {
@@ -125,25 +130,34 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
             return List.of(LoadingStages.ITEM);
         }
 
-        private static final String[] ALL_ITEMS = new String[] {"all_items", "all-items"};
+        private static final String[] ALL_ITEMS = ConfigKeys.of("all_items");
 
         @Override
         public void parseSection(@NotNull Pack pack, @NotNull Path path, @NotNull Key id, @NotNull ConfigSection section) {
             String name = section.getString("name", id.asString());
-            List<String> members;
-            if (section.getBoolean(ALL_ITEMS)) {
-                AbstractItemManager itemManager = (AbstractItemManager) ItemBrowserManagerImpl.this.plugin.itemManager();
-                members = itemManager.orderedItemIds().stream().filter(it -> !itemManager.isVanillaItem(it)).map(Key::asString).collect(Collectors.toList());
-            } else {
-                members = section.getStringList("list");
-            }
+            ConfigValue sourceValue = section.getValue("source");
+            CategorySource source = sourceValue != null
+                    ? CategorySources.fromConfig(sourceValue)
+                    : CategorySources.fromConfig(legacySource(section));
+            List<String> members = source.resolve(CategorySourceContext.of(pack, ItemBrowserManagerImpl.this.plugin.itemManager()));
             Key icon = section.getIdentifier("icon", ItemKeys.STONE);
             int priority = section.getInt("priority");
             List<String> lore = section.getStringList("lore");
             boolean hidden = section.getBoolean("hidden");
-            List<Condition<Context>> conditionList = section.getSectionList("conditions", CommonConditions::fromConfig);
+            List<Condition<Context>> conditionList = section.getSectionList(ConfigKeys.of("condition(s)"), CommonConditions::fromConfig);
             Category category = new Category(id, name, lore, icon, new ArrayList<>(members), priority, hidden, MiscUtils.allOf(conditionList));
             ItemBrowserManagerImpl.this.byId.put(id, category);
+        }
+
+        private ConfigSection legacySource(ConfigSection section) {
+            Map<String, Object> source = new LinkedHashMap<>();
+            if (section.getBoolean(ALL_ITEMS)) {
+                source.put("type", "all_items");
+            } else {
+                source.put("type", "list");
+                source.put("list", section.getStringList("list"));
+            }
+            return ConfigSection.of(section.assemblePath("source"), source);
         }
     }
 
@@ -160,20 +174,22 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         .addIngredient('>', GuiElement.paged((element) -> {
                     Key next = element.gui().hasNextPage() ? Constants.BROWSER_NEXT_PAGE_AVAILABLE : Constants.BROWSER_NEXT_PAGE_BLOCK;
                     return this.plugin.itemManager().getItemDefinition(next)
-                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                                    .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()))
-                                    .withParameter(GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages()))
-                            )))
+                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                                    DirectContextParameters.PLAYER, player,
+                                    GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()),
+                                    GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages())
+                            ).build())))
                             .orElseThrow(() -> new GuiElementMissingException(next));
                 }, true)
         )
         .addIngredient('<', GuiElement.paged((element) -> {
                     Key previous = element.gui().hasPreviousPage() ? Constants.BROWSER_PREVIOUS_PAGE_AVAILABLE : Constants.BROWSER_PREVIOUS_PAGE_BLOCK;
                     return this.plugin.itemManager().getItemDefinition(previous)
-                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                                    .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()))
-                                    .withParameter(GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages()))
-                            )))
+                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                                    DirectContextParameters.PLAYER, player,
+                                    GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()),
+                                    GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages())
+                            ).build())))
                             .orElseThrow(() -> new GuiElementMissingException(previous));
                 }, false)
         );
@@ -182,13 +198,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
             if (!it.condition().test(PlayerOptionalContext.of(player))) {
                 return null;
             }
-            Item item = this.plugin.itemManager().createWrappedItem(it.icon(), player);
+            Item item = Item.byId(it.icon(), player);
             if (ItemUtils.isEmpty(item)) {
                 this.plugin.logger().warn("Cannot find item " + it.icon() + " for category icon");
                 return null;
             }
-            item.customNameJson(AdventureHelper.componentToJson(AdventureHelper.miniMessage().deserialize(it.displayName(), ItemBuildContext.EMPTY_RESOLVERS)));
-            item.loreJson(it.displayLore().stream().map(lore -> AdventureHelper.componentToJson(AdventureHelper.miniMessage().deserialize(lore, ItemBuildContext.EMPTY_RESOLVERS))).toList());
+            item.customNameJson(AdventureHelper.componentToJsonElement(AdventureHelper.miniMessage().deserialize(it.displayName(), ItemBuildContext.EMPTY)));
+            item.loreComponent(it.displayLore().stream().map(lore -> AdventureHelper.miniMessage().deserialize(lore, ItemBuildContext.EMPTY)).toList());
             return new ItemWithAction(item, (element, click) -> {
                 click.cancel();
                 player.playSound(Constants.SOUND_CLICK_BUTTON);
@@ -205,7 +221,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.BROWSER_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.BROWSER_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -236,20 +252,22 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         .addIngredient('>', GuiElement.paged((element) -> {
                     Key next = element.gui().hasNextPage() ? Constants.CATEGORY_NEXT_PAGE_AVAILABLE : Constants.CATEGORY_NEXT_PAGE_BLOCK;
                     return this.plugin.itemManager().getItemDefinition(next)
-                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                                    .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()))
-                                    .withParameter(GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages()))
-                            )))
+                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                                    DirectContextParameters.PLAYER, player,
+                                    GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()),
+                                    GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages())
+                            ).build())))
                             .orElseThrow(() -> new GuiElementMissingException(next));
                 }, true)
         )
         .addIngredient('<', GuiElement.paged((element) -> {
                     Key previous = element.gui().hasPreviousPage() ? Constants.CATEGORY_PREVIOUS_PAGE_AVAILABLE : Constants.CATEGORY_PREVIOUS_PAGE_BLOCK;
                     return this.plugin.itemManager().getItemDefinition(previous)
-                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                                    .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()))
-                                    .withParameter(GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages()))
-                            )))
+                            .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                                    DirectContextParameters.PLAYER, player,
+                                    GuiParameters.CURRENT_PAGE, String.valueOf(element.gui().currentPage()),
+                                    GuiParameters.MAX_PAGE, String.valueOf(element.gui().maxPages())
+                            ).build())))
                             .orElseThrow(() -> new GuiElementMissingException(previous));
                 }, false)
         );
@@ -268,22 +286,22 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 Category subCategory = this.byId.get(Key.of(subCategoryId));
                 Item item;
                 if (subCategory == null) {
-                    item = Objects.requireNonNull(this.plugin.itemManager().createWrappedItem(ItemKeys.BARRIER, player));
-                    item.customNameJson(AdventureHelper.componentToJson(Component.text(subCategoryId).color(NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)));
+                    item = Objects.requireNonNull(Item.byId(ItemKeys.BARRIER, player));
+                    item.customNameJson(AdventureHelper.componentToJsonElement(Component.text(subCategoryId).color(NamedTextColor.RED).decoration(TextDecoration.ITALIC, false)));
                 } else {
                     if (!subCategory.condition().test(PlayerOptionalContext.of(player))) {
                         return null;
                     }
-                    item = this.plugin.itemManager().createWrappedItem(subCategory.icon(), player);
+                    item = Item.byId(subCategory.icon(), player);
                     if (ItemUtils.isEmpty(item)) {
                         if (!subCategory.icon().equals(ItemKeys.AIR)) {
-                            item = Objects.requireNonNull(this.plugin.itemManager().createWrappedItem(ItemKeys.BARRIER, player));
-                            item.customNameJson(AdventureHelper.componentToJson(AdventureHelper.miniMessage().deserialize(subCategory.displayName(), ItemBuildContext.EMPTY_RESOLVERS)));
-                            item.loreJson(subCategory.displayLore().stream().map(lore -> AdventureHelper.componentToJson(AdventureHelper.miniMessage().deserialize(lore, ItemBuildContext.EMPTY_RESOLVERS))).toList());
+                            item = Objects.requireNonNull(Item.byId(ItemKeys.BARRIER, player));
+                            item.customNameJson(AdventureHelper.componentToJsonElement(AdventureHelper.miniMessage().deserialize(subCategory.displayName(), ItemBuildContext.EMPTY)));
+                            item.loreComponent(subCategory.displayLore().stream().map(lore -> AdventureHelper.miniMessage().deserialize(lore, ItemBuildContext.EMPTY)).toList());
                         }
                     } else {
-                        item.customNameJson(AdventureHelper.componentToJson(AdventureHelper.miniMessage().deserialize(subCategory.displayName(), ItemBuildContext.EMPTY_RESOLVERS)));
-                        item.loreJson(subCategory.displayLore().stream().map(lore -> AdventureHelper.componentToJson(AdventureHelper.miniMessage().deserialize(lore, ItemBuildContext.EMPTY_RESOLVERS))).toList());
+                        item.customNameJson(AdventureHelper.componentToJsonElement(AdventureHelper.miniMessage().deserialize(subCategory.displayName(), ItemBuildContext.EMPTY)));
+                        item.loreComponent(subCategory.displayLore().stream().map(lore -> AdventureHelper.miniMessage().deserialize(lore, ItemBuildContext.EMPTY)).toList());
                     }
                 }
                 return new ItemWithAction(item, (element, click) -> {
@@ -294,12 +312,12 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 });
             } else {
                 Key itemId = Key.of(it);
-                Item item = this.plugin.itemManager().createWrappedItem(itemId, player);
+                Item item = Item.byId(itemId, player);
                 boolean canGoFurther;
                 if (ItemUtils.isEmpty(item)) {
                     if (!itemId.equals(ItemKeys.AIR)) {
-                        item = this.plugin.itemManager().createWrappedItem(ItemKeys.BARRIER, player);
-                        item.customNameJson(AdventureHelper.componentToJson(Component.text(it).decoration(TextDecoration.ITALIC, TextDecoration.State.FALSE).color(NamedTextColor.RED)));
+                        item = Item.byId(ItemKeys.BARRIER, player);
+                        item.customNameJson(AdventureHelper.componentToJsonElement(Component.text(it).decoration(TextDecoration.ITALIC, TextDecoration.State.FALSE).color(NamedTextColor.RED)));
                     }
                     canGoFurther = false;
                 } else {
@@ -313,16 +331,16 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                     if (player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION)) {
                         if (MIDDLE_CLICK.contains(c.type()) && c.itemOnCursor() == null) {
-                            Item newItem = this.plugin.itemManager().createWrappedItem(eItem.id(), player);
+                            Item newItem = Item.byId(eItem.id(), player);
                             newItem.count(newItem.maxStackSize());
                             c.setItemOnCursor(newItem);
                             return;
                         }
                         if (SHIFT_LEFT.equals(c.type())) {
-                            player.giveItem(this.plugin.itemManager().createWrappedItem(eItem.id(), player));
+                            player.giveItem(Item.byId(eItem.id(), player));
                             return;
                         } else if (SHIFT_RIGHT.equals(c.type())) {
-                            Item newItem = this.plugin.itemManager().createWrappedItem(eItem.id(), player);
+                            Item newItem = Item.byId(eItem.id(), player);
                             newItem.count(newItem.maxStackSize());
                             player.giveItem(newItem);
                             return;
@@ -356,7 +374,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.CATEGORY_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.CATEGORY_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -371,10 +389,10 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 "         ",
                 "    =    "
         )
-        .addIngredient('X', GuiElement.constant(this.plugin.itemManager().createWrappedItem(result, player), (e, c) -> {
+        .addIngredient('X', GuiElement.constant(Item.byId(result, player), (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
             } else if (RIGHT_CLICK.contains(c.type())) {
@@ -385,13 +403,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 }
             }
         }))
-        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(this.plugin.itemManager().createWrappedItem(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
+        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(Item.byId(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
             c.cancel();
             player.playSound(Constants.SOUND_PICK_ITEM);
             if (LEFT_CLICK.contains(c.type())) {
-                player.giveItem(this.plugin.itemManager().createWrappedItem(result, player));
+                player.giveItem(Item.byId(result, player));
             } else if (RIGHT_CLICK.contains(c.type())) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 player.giveItem(item.count(item.maxStackSize()));
             }
         }) : GuiElement.EMPTY)
@@ -417,7 +435,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.RECIPE_NONE_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.RECIPE_NONE_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -458,13 +476,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         List<Item> ingredients = new ArrayList<>();
         net.momirealms.craftengine.core.item.recipe.Ingredient ingredient = recipe.ingredient();
         for (UniqueKey in : ingredient.items()) {
-            ingredients.add(this.plugin.itemManager().createWrappedItem(in.key(), player));
+            ingredients.add(ingredient.applyPredicateLooks(Item.byId(in.key(), player)).count(ingredient.count));
         }
 
         List<Item> containers = new ArrayList<>();
         net.momirealms.craftengine.core.item.recipe.Ingredient container = recipe.container();
         for (UniqueKey in : container.items()) {
-            containers.add(this.plugin.itemManager().createWrappedItem(in.key(), player));
+            containers.add(ingredient.applyPredicateLooks(Item.byId(in.key(), player)).count(container.count));
         }
 
         GuiLayout layout = new GuiLayout(
@@ -475,10 +493,10 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 "     ^   ",
                 " <  =  > "
         )
-        .addIngredient('X', GuiElement.constant(this.plugin.itemManager().createWrappedItem(result, player).count(recipe.result().count()), (e, c) -> {
+        .addIngredient('X', GuiElement.constant(Item.byId(result, player).count(recipe.result().count()), (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -501,13 +519,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 }
             }
         }))
-        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(this.plugin.itemManager().createWrappedItem(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
+        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(Item.byId(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
             c.cancel();
             player.playSound(Constants.SOUND_PICK_ITEM);
             if (LEFT_CLICK.contains(c.type())) {
-                player.giveItem(this.plugin.itemManager().createWrappedItem(result, player));
+                player.giveItem(Item.byId(result, player));
             } else if (RIGHT_CLICK.contains(c.type())) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 player.giveItem(item.count(item.maxStackSize()));
             }
         }) : GuiElement.EMPTY)
@@ -526,10 +544,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         )
         .addIngredient('>', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(next)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(next)), (e, c) -> {
             c.cancel();
             if (index + 1 < recipes.size()) {
@@ -539,10 +558,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         }))
         .addIngredient('<', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(previous)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(previous)), (e, c) -> {
             c.cancel();
             if (index > 0) {
@@ -553,7 +573,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         .addIngredient('A', GuiElement.recipeIngredient(ingredients, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -579,7 +599,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         .addIngredient('B', GuiElement.recipeIngredient(containers, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -611,7 +631,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.RECIPE_BREWING_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.RECIPE_BREWING_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -628,10 +648,10 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 "         ",
                 " <  =  > "
         )
-        .addIngredient('X', GuiElement.constant(this.plugin.itemManager().createWrappedItem(result, player).count(recipe.result().count()), (e, c) -> {
+        .addIngredient('X', GuiElement.constant(Item.byId(result, player).count(recipe.result().count()), (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -654,13 +674,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 }
             }
         }))
-        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(this.plugin.itemManager().createWrappedItem(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
+        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(Item.byId(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
             c.cancel();
             player.playSound(Constants.SOUND_PICK_ITEM);
             if (LEFT_CLICK.contains(c.type())) {
-                player.giveItem(this.plugin.itemManager().createWrappedItem(result, player));
+                player.giveItem(Item.byId(result, player));
             } else if (RIGHT_CLICK.contains(c.type())) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 player.giveItem(item.count(item.maxStackSize()));
             }
         }) : GuiElement.EMPTY)
@@ -679,10 +699,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         )
         .addIngredient('>', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(next)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(next)), (e, c) -> {
             c.cancel();
             if (index + 1 < recipes.size()) {
@@ -692,10 +713,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         }))
         .addIngredient('<', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(previous)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(previous)), (e, c) -> {
             c.cancel();
             if (index > 0) {
@@ -707,13 +729,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         List<Item> templates = new ArrayList<>();
         Optional.ofNullable(recipe.template()).ifPresent(it -> {
             for (UniqueKey in : it.items()) {
-                templates.add(this.plugin.itemManager().createWrappedItem(in.key(), player).count(it.count()));
+                templates.add(Item.byId(in.key(), player).count(it.count()));
             }
         });
         layout.addIngredient('A', templates.isEmpty() ? GuiElement.EMPTY : GuiElement.recipeIngredient(templates, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -740,13 +762,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         List<Item> bases = new ArrayList<>();
         Optional.ofNullable(recipe.base()).ifPresent(it -> {
             for (UniqueKey in : it.items()) {
-                bases.add(this.plugin.itemManager().createWrappedItem(in.key(), player).count(it.count()));
+                bases.add(Item.byId(in.key(), player).count(it.count()));
             }
         });
         layout.addIngredient('B', bases.isEmpty() ? GuiElement.EMPTY : GuiElement.recipeIngredient(bases, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -773,13 +795,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         List<Item> additions = new ArrayList<>();
         Optional.ofNullable(recipe.addition()).ifPresent(it -> {
             for (UniqueKey in : it.items()) {
-                additions.add(this.plugin.itemManager().createWrappedItem(in.key(), player).count(it.count()));
+                additions.add(Item.byId(in.key(), player).count(it.count()));
             }
         });
         layout.addIngredient('C', additions.isEmpty() ? GuiElement.EMPTY : GuiElement.recipeIngredient(additions, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -811,7 +833,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.RECIPE_SMITHING_TRANSFORM_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.RECIPE_SMITHING_TRANSFORM_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -824,7 +846,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         List<Item> ingredients = new ArrayList<>();
         net.momirealms.craftengine.core.item.recipe.Ingredient ingredient = recipe.ingredient();
         for (UniqueKey in : ingredient.items()) {
-            ingredients.add(this.plugin.itemManager().createWrappedItem(in.key(), player));
+            ingredients.add(ingredient.applyPredicateLooks(Item.byId(in.key(), player)).count(ingredient.count()));
         }
         GuiLayout layout = new GuiLayout(
                 "         ",
@@ -834,10 +856,10 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 "         ",
                 " <  =  > "
         )
-        .addIngredient('X', GuiElement.constant(this.plugin.itemManager().createWrappedItem(result, player).count(recipe.result().count()), (e, c) -> {
+        .addIngredient('X', GuiElement.constant(Item.byId(result, player).count(recipe.result().count()), (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -860,20 +882,20 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 }
             }
         }))
-        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(this.plugin.itemManager().createWrappedItem(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
+        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(Item.byId(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
             c.cancel();
             player.playSound(Constants.SOUND_PICK_ITEM);
             if (LEFT_CLICK.contains(c.type())) {
-                player.giveItem(this.plugin.itemManager().createWrappedItem(result, player));
+                player.giveItem(Item.byId(result, player));
             } else if (RIGHT_CLICK.contains(c.type())) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 player.giveItem(item.count(item.maxStackSize()));
             }
         }) : GuiElement.EMPTY)
         .addIngredient('A', GuiElement.recipeIngredient(ingredients, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -911,10 +933,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         )
         .addIngredient('>', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(next)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(next)), (e, c) -> {
             c.cancel();
             if (index + 1 < recipes.size()) {
@@ -924,10 +947,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         }))
         .addIngredient('<', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(previous)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(previous)), (e, c) -> {
             c.cancel();
             if (index > 0) {
@@ -944,7 +968,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.RECIPE_STONECUTTING_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.RECIPE_STONECUTTING_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -957,7 +981,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         List<Item> ingredients = new ArrayList<>();
         net.momirealms.craftengine.core.item.recipe.Ingredient ingredient = recipe.ingredient();
         for (UniqueKey in : ingredient.items()) {
-            ingredients.add(this.plugin.itemManager().createWrappedItem(in.key(), player));
+            ingredients.add(ingredient.applyPredicateLooks(Item.byId(in.key(), player)).count(ingredient.count));
         }
         GuiLayout layout = new GuiLayout(
                 "         ",
@@ -967,10 +991,10 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 "         ",
                 " <  =  > "
         )
-        .addIngredient('X', GuiElement.constant(this.plugin.itemManager().createWrappedItem(result, player).count(recipe.result().count()), (e, c) -> {
+        .addIngredient('X', GuiElement.constant(Item.byId(result, player).count(recipe.result().count()), (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -994,25 +1018,26 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
             }
         }))
         .addIngredient('?', GuiElement.constant(this.plugin.itemManager().getItemDefinition(Constants.RECIPE_COOKING_INFO)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.COOKING_TIME, String.valueOf(recipe.cookingTime()))
-                        .withParameter(GuiParameters.COOKING_EXPERIENCE, String.valueOf(recipe.experience()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.COOKING_TIME, String.valueOf(recipe.cookingTime()),
+                        GuiParameters.COOKING_EXPERIENCE, String.valueOf(recipe.experience())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(Constants.RECIPE_COOKING_INFO)), (e, c) -> c.cancel()))
-        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(this.plugin.itemManager().createWrappedItem(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
+        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(Item.byId(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
             c.cancel();
             player.playSound(Constants.SOUND_PICK_ITEM);
             if (LEFT_CLICK.contains(c.type())) {
-                player.giveItem(this.plugin.itemManager().createWrappedItem(result, player));
+                player.giveItem(Item.byId(result, player));
             } else if (RIGHT_CLICK.contains(c.type())) {
-                Item item = this.plugin.itemManager().createWrappedItem(result, player);
+                Item item = Item.byId(result, player);
                 player.giveItem(item.count(item.maxStackSize()));
             }
         }) : GuiElement.EMPTY)
         .addIngredient('A', GuiElement.recipeIngredient(ingredients, (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                Item item = Item.byId(e.item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -1050,10 +1075,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         )
         .addIngredient('>', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(next)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(next)), (e, c) -> {
             c.cancel();
             if (index + 1 < recipes.size()) {
@@ -1063,10 +1089,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         }))
         .addIngredient('<', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(previous)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(previous)), (e, c) -> {
             c.cancel();
             if (index > 0) {
@@ -1094,7 +1121,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(title, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(title, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }
@@ -1112,10 +1139,10 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 "         ",
                 " <  =  > "
         )
-        .addIngredient('X', GuiElement.constant(this.plugin.itemManager().createWrappedItem(result, player).count(recipe.result().count()), (e, c) -> {
+        .addIngredient('X', GuiElement.constant(Item.byId(result, player).count(recipe.result().count()), (e, c) -> {
             c.cancel();
             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                Item item = this.plugin.itemManager().createWrappedItem(recipe.result().item().id(), player);
+                Item item = Item.byId(recipe.result().item().id(), player);
                 item.count(item.maxStackSize());
                 c.setItemOnCursor(item);
                 return;
@@ -1138,13 +1165,13 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                 }
             }
         }))
-        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(this.plugin.itemManager().createWrappedItem(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
+        .addIngredient('^', player.hasPermission(GET_ITEM_PERMISSION) ? GuiElement.constant(Item.byId(Constants.RECIPE_GET_ITEM, player), (e, c) -> {
             c.cancel();
             player.playSound(Constants.SOUND_PICK_ITEM);
             if (LEFT_CLICK.contains(c.type())) {
-                player.giveItem(this.plugin.itemManager().createWrappedItem(recipe.result().item().id(), player));
+                player.giveItem(Item.byId(recipe.result().item().id(), player));
             } else if (RIGHT_CLICK.contains(c.type())) {
-                Item item = this.plugin.itemManager().createWrappedItem(recipe.result().item().id(), player);
+                Item item = Item.byId(recipe.result().item().id(), player);
                 player.giveItem(item.count(item.maxStackSize()));
             }
         }) : GuiElement.EMPTY)
@@ -1163,10 +1190,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         )
         .addIngredient('>', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(next)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(next)), (e, c) -> {
             c.cancel();
             if (index + 1 < recipes.size()) {
@@ -1176,10 +1204,11 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
         }))
         .addIngredient('<', GuiElement.constant(this.plugin.itemManager()
                 .getItemDefinition(previous)
-                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder()
-                        .withParameter(GuiParameters.CURRENT_PAGE, String.valueOf(index + 1))
-                        .withParameter(GuiParameters.MAX_PAGE, String.valueOf(recipes.size()))
-                )))
+                .map(it -> it.buildItem(ItemBuildContext.of(player, ContextHolder.builder(
+                        DirectContextParameters.PLAYER, player,
+                        GuiParameters.CURRENT_PAGE, String.valueOf(index + 1),
+                        GuiParameters.MAX_PAGE, String.valueOf(recipes.size())
+                ).build())))
                 .orElseThrow(() -> new GuiElementMissingException(previous)), (e, c) -> {
             c.cancel();
             if (index > 0) {
@@ -1202,12 +1231,12 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                         } else {
                             List<Item> ingredients = new ArrayList<>();
                             for (UniqueKey in : ingredient.items()) {
-                                ingredients.add(this.plugin.itemManager().createWrappedItem(in.key(), player).count(ingredient.count()));
+                                ingredients.add(ingredient.applyPredicateLooks(Item.byId(in.key(), player)).count(ingredient.count()));
                             }
                             layout.addIngredient(currentChar, GuiElement.recipeIngredient(ingredients, (e, c) -> {
                                 c.cancel();
                                 if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                                    Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                                    Item item = Item.byId(e.item().id(), player);
                                     item.count(item.maxStackSize());
                                     c.setItemOnCursor(item);
                                     return;
@@ -1246,12 +1275,12 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                         List<Item> ingredientItems = new ArrayList<>();
                         net.momirealms.craftengine.core.item.recipe.Ingredient ingredient = ingredients.get(i);
                         for (UniqueKey in : ingredient.items()) {
-                            ingredientItems.add(this.plugin.itemManager().createWrappedItem(in.key(), player).count(ingredient.count()));
+                            ingredientItems.add(ingredient.applyPredicateLooks(Item.byId(in.key(), player)).count(ingredient.count()));
                         }
                         layout.addIngredient(currentChar, GuiElement.recipeIngredient(ingredientItems, (e, c) -> {
                             c.cancel();
                             if (MIDDLE_CLICK.contains(c.type()) && player.isCreativeMode() && player.hasPermission(GET_ITEM_PERMISSION) && c.itemOnCursor() == null) {
-                                Item item = this.plugin.itemManager().createWrappedItem(e.item().id(), player);
+                                Item item = Item.byId(e.item().id(), player);
                                 item.count(item.maxStackSize());
                                 c.setItemOnCursor(item);
                                 return;
@@ -1290,7 +1319,7 @@ public final class ItemBrowserManagerImpl implements ItemBrowserManager {
                     }
                 })
                 .build()
-                .title(AdventureHelper.miniMessage().deserialize(Constants.RECIPE_CRAFTING_TITLE, PlayerOptionalContext.of(player).tagResolvers()))
+                .title(AdventureHelper.deserialize(Constants.RECIPE_CRAFTING_TITLE, PlayerOptionalContext.of(player)))
                 .refresh()
                 .open(player);
     }

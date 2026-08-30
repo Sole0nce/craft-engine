@@ -46,6 +46,9 @@ public class BukkitStorageAdaptor implements StorageAdaptor {
 
     @Override
     public @NotNull WorldDataStorage adapt(@NotNull World world) {
+        if (Config.isBlacklistedWorld(world.name())) {
+            return new NoneStorage();
+        }
         return adapt(world, Config.chunkStorageType());
     }
 
@@ -56,20 +59,29 @@ public class BukkitStorageAdaptor implements StorageAdaptor {
             }
             case MCA -> {
                 Path path = world.directory().resolve(CEWorld.REGION_DIRECTORY);
-                if (Config.enableChunkCache()) {
-                    return new CachedStorage<>(new DefaultRegionFileStorage(path, VersionHelper.isFolia ? FOLIA_FACTORY : BUKKIT_FACTORY));
-                } else {
-                    return new DefaultRegionFileStorage(path, VersionHelper.isFolia ? FOLIA_FACTORY : BUKKIT_FACTORY);
-                }
+                return wrap(new MCARegionFileStorage(path, VersionHelper.hasFoliaPatch ? FOLIA_FACTORY : BUKKIT_FACTORY));
+            }
+            case LINEAR -> {
+                Path path = world.directory().resolve(CEWorld.REGION_DIRECTORY);
+                return wrap(new LinearRegionFileStorage(path, VersionHelper.hasFoliaPatch ? FOLIA_FACTORY : BUKKIT_FACTORY));
             }
             case PDC -> {
                 if (Config.enableChunkCache()) {
-                    return new CachedStorage<>(new PersistentDataContainerStorage(world, VersionHelper.isFolia ? FOLIA_FACTORY : BUKKIT_FACTORY));
+                    return new CachedStorage<>(new PersistentDataContainerStorage(world, VersionHelper.hasFoliaPatch ? FOLIA_FACTORY : BUKKIT_FACTORY));
                 } else {
-                    return new PersistentDataContainerStorage(world, VersionHelper.isFolia ? FOLIA_FACTORY : BUKKIT_FACTORY);
+                    return new PersistentDataContainerStorage(world, VersionHelper.hasFoliaPatch ? FOLIA_FACTORY : BUKKIT_FACTORY);
                 }
             }
             default -> throw new UnsupportedOperationException("Unsupported chunk storage type: " + Config.chunkStorageType());
+        }
+    }
+
+    private @NotNull WorldDataStorage wrap(@NotNull RegionStorage regionStorage) {
+        WorldDataStorage storage = Config.enableAsyncChunkWrite() ? new AsyncStorage(regionStorage) : regionStorage;
+        if (Config.enableChunkCache()) {
+            return new CachedStorage<>(storage);
+        } else {
+            return storage;
         }
     }
 }

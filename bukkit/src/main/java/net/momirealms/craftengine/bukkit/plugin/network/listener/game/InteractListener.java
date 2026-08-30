@@ -15,14 +15,17 @@ import net.momirealms.craftengine.core.entity.furniture.hitbox.FurnitureHitboxPa
 import net.momirealms.craftengine.core.entity.player.InteractionHand;
 import net.momirealms.craftengine.core.entity.player.InteractionResult;
 import net.momirealms.craftengine.core.entity.seat.Seat;
+import net.momirealms.craftengine.core.entity.seat.SeatOwner;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.item.ItemDefinition;
 import net.momirealms.craftengine.core.item.behavior.FurnitureItem;
 import net.momirealms.craftengine.core.item.behavior.ItemBehavior;
 import net.momirealms.craftengine.core.plugin.CraftEngine;
+import net.momirealms.craftengine.core.plugin.context.Context;
 import net.momirealms.craftengine.core.plugin.context.ContextHolder;
 import net.momirealms.craftengine.core.plugin.context.EventTrigger;
 import net.momirealms.craftengine.core.plugin.context.PlayerOptionalContext;
+import net.momirealms.craftengine.core.plugin.context.function.Function;
 import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
 import net.momirealms.craftengine.core.plugin.network.NetWorkUser;
 import net.momirealms.craftengine.core.plugin.network.event.ByteBufPacketEvent;
@@ -50,6 +53,7 @@ import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
+import java.util.List;
 import java.util.Optional;
 
 public final class InteractListener {
@@ -189,7 +193,7 @@ public final class InteractListener {
             Player platformPlayer = serverPlayer.platformPlayer();
             if (platformPlayer == null) return;
             // 检测能否交互碰撞箱
-            Location eyeLocation = platformPlayer.getEyeLocation();
+            Location eyeLocation = serverPlayer.getEyeLocation();
             Vector direction = eyeLocation.getDirection();
             Location endLocation = eyeLocation.clone();
             endLocation.add(direction.multiply(serverPlayer.getCachedInteractionRange()));
@@ -203,8 +207,7 @@ public final class InteractListener {
             // 获取正确的交互点
             Location interactionPoint = new Location(platformPlayer.getWorld(), hitLocation.x, hitLocation.y, hitLocation.z);
             // 触发事件
-            ContextHolder.Builder contextBuilder = ContextHolder.builder();
-            FurnitureInteractEvent interactEvent = new FurnitureInteractEvent(serverPlayer.platformPlayer(), furniture, hand, interactionPoint, hitBox, contextBuilder);
+            FurnitureInteractEvent interactEvent = new FurnitureInteractEvent(serverPlayer.platformPlayer(), furniture, hand, interactionPoint, hitBox);
             if (EventUtils.fireAndCheckCancel(interactEvent)) {
                 return;
             }
@@ -233,20 +236,26 @@ public final class InteractListener {
 
             // 执行事件动作
             Item itemInHand = serverPlayer.getItemInHand(InteractionHand.MAIN_HAND);
-            Cancellable cancellable = Cancellable.of(interactEvent::isCancelled, interactEvent::setCancelled);
-            // execute functions
-            PlayerOptionalContext context = PlayerOptionalContext.of(serverPlayer,
-                    contextBuilder
-                            .withParameter(DirectContextParameters.EVENT, cancellable)
-                            .withParameter(DirectContextParameters.FURNITURE, furniture)
-                            .withParameter(DirectContextParameters.ITEM_IN_HAND, itemInHand)
-                            .withParameter(DirectContextParameters.HAND, hand)
-                            .withParameter(DirectContextParameters.POSITION, furniture.position())
-            );
-            furniture.config().execute(context, EventTrigger.RIGHT_CLICK);
-            if (cancellable.isCancelled()) {
-                return;
+
+            // 执行函数
+            List<Function<Context>> functions = furniture.config.eventFunctions(EventTrigger.RIGHT_CLICK);
+            if (!functions.isEmpty()) {
+                Cancellable cancellable = Cancellable.of(interactEvent::isCancelled, interactEvent::setCancelled);
+                Function.execute(PlayerOptionalContext.of(serverPlayer,
+                        ContextHolder.builder()
+                                .withParameter(DirectContextParameters.PLAYER, serverPlayer)
+                                .withParameter(DirectContextParameters.EVENT, cancellable)
+                                .withParameter(DirectContextParameters.FURNITURE, furniture)
+                                .withParameter(DirectContextParameters.ITEM_IN_HAND, itemInHand)
+                                .withParameter(DirectContextParameters.HAND, hand)
+                                .withParameter(DirectContextParameters.POSITION, furniture.position())
+                                .build()
+                ), functions);
+                if (cancellable.isCancelled()) {
+                    return;
+                }
             }
+
             // 不处理调试棒
             if (BukkitItemUtils.isDebugStick(itemInHand)) {
                 return;
@@ -256,7 +265,7 @@ public final class InteractListener {
                 return;
             }
             // 必须从网络包层面处理，否则无法获取交互的具体实体
-            if (usingSecondaryAction && !itemInHand.isEmpty() && hitBox.config().canUseItemOn()) {
+            if (usingSecondaryAction && !itemInHand.isEmpty() && hitBox.canUseItemOn()) {
                 Optional<ItemDefinition> optionalItemDefinition = itemInHand.getDefinition();
                 if (optionalItemDefinition.isPresent()) {
                     ItemDefinition itemDefinition = optionalItemDefinition.get();
@@ -271,10 +280,10 @@ public final class InteractListener {
                 serverPlayer.setResendSound();
 
                 {
-                    Object nmsPlayer = serverPlayer.serverPlayer();
+                    Object nmsPlayer = serverPlayer.minecraftPlayer();
                     Object serverLevel = ServerPlayerProxy.INSTANCE.getLevel(nmsPlayer);
                     Object blockPos = LocationUtils.toBlockPos(hitResult.blockPos());
-                    Object previousBlockState = ServerLevelProxy.INSTANCE.getBlockStateIfLoaded(serverLevel, blockPos);
+                    Object previousBlockState = ServerLevelProxy.INSTANCE.getBlockState(serverLevel, blockPos);
                     if (previousBlockState != null) {
                         Object clickedPoint = Vec3Proxy.INSTANCE.newInstance(hitResult.hitLocation().x, hitResult.hitLocation().y, hitResult.hitLocation().z);
                         Object nmsDirection = DirectionUtils.toNMSDirection(hitResult.direction());
@@ -299,7 +308,7 @@ public final class InteractListener {
                 }
             } else {
                 if (!usingSecondaryAction) {
-                    for (Seat<FurnitureHitBox> seat : hitBox.seats()) {
+                    for (Seat<SeatOwner> seat : hitBox.seats()) {
                         if (!seat.isOccupied()) {
                             if (seat.spawnSeat(serverPlayer, furniture.position())) {
                                 if (!part.interactive()) {

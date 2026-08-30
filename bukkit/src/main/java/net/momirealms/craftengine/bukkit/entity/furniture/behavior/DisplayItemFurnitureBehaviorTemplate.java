@@ -4,6 +4,7 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import net.momirealms.antigrieflib.Flag;
 import net.momirealms.craftengine.bukkit.entity.data.item.ItemEntityData;
 import net.momirealms.craftengine.bukkit.plugin.BukkitCraftEngine;
+import net.momirealms.craftengine.bukkit.util.EntityUtils;
 import net.momirealms.craftengine.bukkit.util.ItemStackUtils;
 import net.momirealms.craftengine.bukkit.util.PacketUtils;
 import net.momirealms.craftengine.core.entity.furniture.Furniture;
@@ -20,19 +21,20 @@ import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.item.Item;
 import net.momirealms.craftengine.core.plugin.config.Config;
 import net.momirealms.craftengine.core.plugin.config.ConfigConstants;
+import net.momirealms.craftengine.core.plugin.config.ConfigKeys;
 import net.momirealms.craftengine.core.plugin.config.ConfigSection;
 import net.momirealms.craftengine.core.sound.SoundData;
 import net.momirealms.craftengine.core.sound.SoundSource;
 import net.momirealms.craftengine.core.util.ItemUtils;
 import net.momirealms.craftengine.core.util.MiscUtils;
+import net.momirealms.craftengine.core.util.VersionHelper;
 import net.momirealms.craftengine.core.world.Vec3d;
 import net.momirealms.craftengine.core.world.WorldPosition;
 import net.momirealms.craftengine.core.world.context.InteractEntityContext;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundAddEntityPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundSetEntityDataPacketProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypeProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypesProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.phys.Vec3Proxy;
 import net.momirealms.sparrow.nbt.CompoundTag;
 import net.momirealms.sparrow.nbt.Tag;
@@ -103,6 +105,7 @@ public final class DisplayItemFurnitureBehaviorTemplate extends FurnitureBehavio
             if (!this.savedItem.isEmpty()) {
                 Tag itemStackAsTag = ItemStackUtils.saveMinecraftItemStackAsTag(this.savedItem.minecraftItem());
                 if (itemStackAsTag != null) {
+                    data.putInt("data_version", VersionHelper.WORLD_VERSION);
                     data.put(Optional.ofNullable(behavior.customDataKey).orElse(DEFAULT_DATA_KEY), itemStackAsTag);
                 }
             }
@@ -241,15 +244,15 @@ public final class DisplayItemFurnitureBehaviorTemplate extends FurnitureBehavio
             WorldPosition furniturePos = furniture.position();
             Vec3d position = Furniture.getRelativePosition(furniturePos, relative);
             this.position = new WorldPosition(furniturePos.world, position.x, position.y, position.z, furniturePos.xRot, furniturePos.yRot);
-            this.vehicleId = EntityProxy.ENTITY_COUNTER.incrementAndGet();
-            this.passengerId = EntityProxy.ENTITY_COUNTER.incrementAndGet();
+            this.vehicleId = EntityUtils.ENTITY_COUNTER.incrementAndGet();
+            this.passengerId = EntityUtils.ENTITY_COUNTER.incrementAndGet();
             this.spawnVehiclePacket = ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
                     vehicleId, UUID.randomUUID(), position.x, position.y, position.z,
-                    0, 0, EntityTypeProxy.ITEM_DISPLAY, 0, Vec3Proxy.ZERO, 0
+                    0, 0, EntityTypesProxy.ITEM_DISPLAY, 0, Vec3Proxy.ZERO, 0
             );
             this.spawnPassengerPacket = ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
                     passengerId, UUID.randomUUID(), position.x, position.y, position.z,
-                    0, 0, EntityTypeProxy.ITEM, 0, Vec3Proxy.ZERO, 0
+                    0, 0, EntityTypesProxy.ITEM, 0, Vec3Proxy.ZERO, 0
             );
             this.ridePacket = PacketUtils.createClientboundSetPassengersPacket(this.vehicleId, this.passengerId);
             this.despawnAllPacket = ClientboundRemoveEntitiesPacketProxy.INSTANCE.newInstance(MiscUtils.init(new IntArrayList(),
@@ -307,8 +310,8 @@ public final class DisplayItemFurnitureBehaviorTemplate extends FurnitureBehavio
 
     // 工厂类
     private static class Factory implements FurnitureBehaviorFactory<DisplayItemFurnitureBehaviorTemplate> {
-        private static final String[] ITEM_POSITION = new String[] {"item_position", "item-position"};
-        private static final String[] DATA_KEY = new String[] {"data_key", "data-key"};
+        private static final String[] ITEM_POSITION = ConfigKeys.of("item_position");
+        private static final String[] DATA_KEY = ConfigKeys.of("data_key");
 
         @Override
         public DisplayItemFurnitureBehaviorTemplate create(FurnitureDefinition furniture, ConfigSection section) {

@@ -1,13 +1,14 @@
 import net.minecrell.pluginyml.paper.PaperPluginDescription
 import net.momirealms.nbt
 import net.momirealms.paperServer
+import net.momirealms.versionOf
 import xyz.jpenilla.runpaper.task.RunServer
 import xyz.jpenilla.runtask.pluginsapi.PluginDownloadService
 import xyz.jpenilla.runtask.service.DownloadsAPIService
 
 plugins {
-    id("de.eldoria.plugin-yml.paper") version "0.7.1"
-    id("xyz.jpenilla.run-paper") version "3.0.2"
+    alias(libs.plugins.paper.yml)
+    alias(libs.plugins.run.paper)
 }
 
 repositories {
@@ -23,28 +24,30 @@ dependencies {
     nbt(project)
 
     implementation(project(":core"))
-    implementation(project(":bukkit"))
+    implementation(project(":bukkit")) {
+        exclude(group = "net.momirealms", module = "antigrieflib")
+    }
     implementation(project(":bukkit:legacy"))
     implementation(project(":bukkit:compatibility"))
     implementation(project(":bukkit:compatibility:legacy"))
     implementation(project(":common-files"))
 
-    // concurrentutil
-    implementation(files("${rootProject.rootDir}/libs/concurrentutil-${rootProject.properties["concurrent_util_version"]}.jar"))
+    // leafpile
+    implementation(files("${rootProject.rootDir}/libs/leafpile-${versionOf("leafpile")}.jar"))
 
-    implementation("net.momirealms:sparrow-util:${rootProject.properties["sparrow_util_version"]}")
-    implementation("net.momirealms:antigrieflib:${rootProject.properties["anti_grief_version"]}")
-    implementation("net.momirealms:craft-engine-nms-helper-mojmap:${rootProject.properties["nms_helper_version"]}")
-    implementation("cn.gtemc:itembridge:${rootProject.properties["itembridge_version"]}")
-    implementation("cn.gtemc:levelerbridge:${rootProject.properties["levelerbridge_version"]}")
-    implementation(files("${rootProject.rootDir}/libs/jni-internal-lookup-1.9.jar"))
+    implementation(libs.sparrow.minimessage)
+    implementation(libs.sparrow.util)
+    implementation(libs.nms.helper.mojmap)
+    implementation(libs.itembridge)
+    implementation(libs.levelerbridge)
+    implementation(files("${rootProject.rootDir}/libs/jni-internal-lookup-${versionOf("jni-internal-lookup")}.jar"))
 }
 
 paper {
     load = net.minecrell.pluginyml.bukkit.BukkitPluginDescription.PluginLoadOrder.STARTUP
     main = "net.momirealms.craftengine.bukkit.plugin.PaperCraftEnginePlugin"
     bootstrapper = "net.momirealms.craftengine.bukkit.plugin.PaperCraftEngineBootstrap"
-    version = rootProject.properties["project_version"] as String
+    version = project.version.toString()
     name = "CraftEngine"
     apiVersion = "1.20"
     authors = listOf("XiaoMoMi")
@@ -63,10 +66,20 @@ paper {
         }
 
         register("PlaceholderAPI") { required = false }
-        register("Skript") { required = false }
+        register("Skript") {
+            required = false
+            load = PaperPluginDescription.RelativeLoadOrder.AFTER
+        }
+        register("Denizen") {
+            required = false
+            load = PaperPluginDescription.RelativeLoadOrder.AFTER
+        }
         register("LuckPerms") { required = false }
         register("ViaVersion") { required = false }
+        register("Vault") { required = false }
+        register("AxiomPaper") { required = false }
         register("QuickShop-Hikari") { required = false }
+        register("CoreProtect") { required = false }
 
         // PacketEvents
         register("GrimAC") { required = false }
@@ -163,6 +176,8 @@ paper {
         register("hClaims") { required = false }
         register("Factions") { required = false }
         register("NoBuildPlus") { required = false }
+        register("SimpleClaimSystem") { required = false }
+        register("LandClaimPlugin") { required = false }
     }
 }
 
@@ -177,13 +192,14 @@ tasks {
             attributes["paperweight-mappings-namespace"] = "mojang"
         }
         from(project(":bukkit:proxy").tasks.shadowJar.flatMap { it.archiveFile })
-        archiveFileName = "${rootProject.name}-paper-plugin-${rootProject.properties["project_version"]}.jar"
+        archiveFileName = "${rootProject.name}-paper-plugin-${project.version}.jar"
         destinationDirectory.set(file("$rootDir/target"))
     }
 }
 
 listOf(
     "26.1.2",
+    "26.2"
 ).forEach {
     registerPaperTask(it, javaVersion = 25)
 }

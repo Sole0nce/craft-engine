@@ -40,22 +40,23 @@ public final class ItemUpdateConfig {
         }
         ItemBuildContext buildContext = context.get();
         Item orginalItem = item;
+        buildContext.setItem(orginalItem);
         for (Version version : this.versions) {
             if (currentVersion < version.version) {
-                item = version.apply(item, buildContext);
+                version.apply(buildContext);
             }
         }
+        item = buildContext.item();
         item.setTag(this.maxVersion, ItemVersionProcessor.VERSION_TAG);
         return new ItemUpdateResult(item, orginalItem != item, true);
     }
 
     public record Version(int version, ItemUpdater[] updaters) implements Comparable<Version> {
 
-        public <T> Item apply(Item item, ItemBuildContext context) {
+        public void apply(ItemBuildContext context) {
             for (ItemUpdater updater : updaters) {
-                item = updater.update(item, context);
+                updater.update(context);
             }
-            return item;
         }
 
         @Override

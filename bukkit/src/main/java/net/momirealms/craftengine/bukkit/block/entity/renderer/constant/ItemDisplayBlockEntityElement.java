@@ -9,8 +9,7 @@ import net.momirealms.craftengine.core.world.BlockPos;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundAddEntityPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacketProxy;
 import net.momirealms.craftengine.proxy.minecraft.network.protocol.game.ClientboundSetEntityDataPacketProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityProxy;
-import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypeProxy;
+import net.momirealms.craftengine.proxy.minecraft.world.entity.EntityTypesProxy;
 import net.momirealms.craftengine.proxy.minecraft.world.phys.Vec3Proxy;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -29,7 +28,7 @@ public final class ItemDisplayBlockEntityElement extends AbstractConstantBlockEn
     public BlockEntityTintSource tintSource;
 
     ItemDisplayBlockEntityElement(ItemDisplayBlockEntityElementConfig config, BlockPos pos, BlockEntityTintSource tintSource) {
-        this(config, pos, tintSource, EntityProxy.ENTITY_COUNTER.incrementAndGet(), false);
+        this(config, pos, tintSource, EntityUtils.ENTITY_COUNTER.incrementAndGet(), false);
     }
 
     ItemDisplayBlockEntityElement(ItemDisplayBlockEntityElementConfig config, BlockPos pos, @Nullable BlockEntityTintSource tintSource, int entityId, boolean posChanged) {
@@ -37,13 +36,13 @@ public final class ItemDisplayBlockEntityElement extends AbstractConstantBlockEn
         Vector3f position = config.position();
         this.tintSource = tintSource;
         this.cachedSpawnPacket = ClientboundAddEntityPacketProxy.INSTANCE.newInstance(
-                entityId, UUID.randomUUID(), pos.x() + position.x, pos.y() + position.y, pos.z() + position.z,
-                config.xRot(), config.yRot(), EntityTypeProxy.ITEM_DISPLAY, 0, Vec3Proxy.ZERO, 0
+                entityId, UUID.randomUUID(), pos.x() + (double) position.x, pos.y() + (double) position.y, pos.z() + (double) position.z,
+                config.xRot(), config.yRot(), EntityTypesProxy.ITEM_DISPLAY, 0, Vec3Proxy.ZERO, 0
         );
         this.config = config;
         this.cachedDespawnPacket = ClientboundRemoveEntitiesPacketProxy.INSTANCE.newInstance(IntList.of(entityId));
         this.entityId = entityId;
-        this.cachedUpdatePosPacket = posChanged ? EntityUtils.createUpdatePosPacket(this.entityId, pos.x() + position.x, pos.y() + position.y, pos.z() + position.z, config.yRot(), config.xRot(), false) : null;
+        this.cachedUpdatePosPacket = posChanged ? EntityUtils.createUpdatePosPacket(this.entityId, pos.x() + (double) position.x, pos.y() + (double) position.y, pos.z() + (double) position.z, config.yRot(), config.xRot(), false) : null;
     }
 
     @Override
@@ -53,15 +52,15 @@ public final class ItemDisplayBlockEntityElement extends AbstractConstantBlockEn
 
     @Override
     public void showInternal(Player player) {
-        player.sendPackets(List.of(this.cachedSpawnPacket, ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, this.config.metadataValues(player, this.tintSource))), false);
+        player.sendPackets(List.of(this.cachedSpawnPacket, ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, this.config.metadataValues(player, this.tintSource, false))), false);
     }
 
     @Override
     public void update(@NotNull Player player) {
         if (this.cachedUpdatePosPacket != null) {
-            player.sendPackets(List.of(this.cachedUpdatePosPacket, ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, this.config.metadataValues(player, this.tintSource))), false);
+            player.sendPackets(List.of(this.cachedUpdatePosPacket, ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, this.config.metadataValues(player, this.tintSource, true))), false);
         } else {
-            player.sendPacket(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, this.config.metadataValues(player, this.tintSource)), false);
+            player.sendPacket(ClientboundSetEntityDataPacketProxy.INSTANCE.newInstance(this.entityId, this.config.metadataValues(player, this.tintSource, true)), false);
         }
     }
 

@@ -7,7 +7,9 @@ import net.momirealms.craftengine.core.block.DelegatingBlockState;
 import net.momirealms.craftengine.core.block.ImmutableBlockState;
 import net.momirealms.craftengine.core.block.setting.BlockSettings;
 import net.momirealms.craftengine.core.item.Item;
+import net.momirealms.craftengine.core.util.ItemUtils;
 import net.momirealms.craftengine.core.util.Key;
+import net.momirealms.craftengine.core.util.VersionHelper;
 import net.momirealms.craftengine.proxy.bukkit.craftbukkit.CraftWorldProxy;
 import net.momirealms.craftengine.proxy.bukkit.craftbukkit.block.data.CraftBlockDataProxy;
 import net.momirealms.craftengine.proxy.minecraft.core.IdMapProxy;
@@ -49,10 +51,17 @@ public final class BlockStateUtils {
 
     public static boolean isCorrectTool(@NotNull ImmutableBlockState state, @Nullable Item itemInHand) {
         BlockSettings settings = state.settings();
-        if (settings.requireCorrectTool()) {
-            if (itemInHand == null || itemInHand.isEmpty()) return false;
-            return settings.isCorrectTool(itemInHand.id()) ||
-                    (settings.respectToolComponent() && ItemStackProxy.INSTANCE.isCorrectToolForDrops(itemInHand.minecraftItem(), state.customBlockState().minecraftState()));
+        int power = settings.requiredBreakPower();
+        boolean requiresCorrectTool = settings.requireCorrectTool();
+        if (!requiresCorrectTool && power <= 0) return true;
+        if (itemInHand == null || itemInHand.isEmpty()) return false;
+        if (requiresCorrectTool) {
+            if (!settings.isCorrectTool(itemInHand.id()) && !(settings.respectToolComponent() && ItemStackProxy.INSTANCE.isCorrectToolForDrops(itemInHand.minecraftItem(), state.customBlockState().minecraftState()))) {
+                return false;
+            }
+        }
+        if (power > 0) {
+            return ItemUtils.breakPower(itemInHand) >= settings.requiredBreakPower();
         }
         return true;
     }
@@ -64,7 +73,11 @@ public final class BlockStateUtils {
     }
 
     public static BlockData fromBlockData(Object blockState) {
-        return BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.asBlockData(blockState);
+        if (VersionHelper.hasPaperPatch) {
+            return BlockBehaviourProxy.BlockStateBaseProxy.INSTANCE.asBlockData(blockState);
+        } else {
+            return CraftBlockDataProxy.INSTANCE.fromData(blockState);
+        }
     }
 
     public static int blockDataToId(BlockData blockData) {
@@ -142,7 +155,24 @@ public final class BlockStateUtils {
         return BlockGetterProxy.INSTANCE.getBlockState(CraftWorldProxy.INSTANCE.getWorld(block.getWorld()), LocationUtils.toBlockPos(block.getX(), block.getY(), block.getZ()));
     }
 
+    public static Key getBlockOwner(Block block) {
+        Object blockState = getBlockState(block);
+        Optional<ImmutableBlockState> optionalCustomBlockState = getOptionalCustomBlockState(blockState);
+        if (optionalCustomBlockState.isPresent()) {
+            return optionalCustomBlockState.get().owner().value().id();
+        }
+        return getBlockOwnerIdFromState(blockState);
+    }
+
     public static boolean isBurnable(Object blockState) {
         return BukkitBlockManager.instance().isBurnable(blockState);
+    }
+
+    public static String getDescriptionId(Object blockState) {
+        if (VersionHelper.isOrAbove1_21_2) {
+            return BlockBehaviourProxy.INSTANCE.getDescriptionId(getBlockOwner(blockState));
+        } else {
+            return BlockProxy.INSTANCE.getDescriptionId(getBlockOwner(blockState));
+        }
     }
 }

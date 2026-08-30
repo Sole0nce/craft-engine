@@ -1,24 +1,25 @@
 package net.momirealms.craftengine.core.plugin.context;
 
-import net.kyori.adventure.text.minimessage.tag.resolver.TagResolver;
 import net.momirealms.craftengine.core.entity.player.Player;
 import net.momirealms.craftengine.core.plugin.context.parameter.DirectContextParameters;
-import net.momirealms.craftengine.core.plugin.text.minimessage.*;
-import net.momirealms.craftengine.core.util.MiscUtils;
 import org.jetbrains.annotations.NotNull;
-
-import java.util.HashMap;
 
 public final class NetworkTextReplaceContext extends PlayerOptionalContext implements PlayerContext {
 
-    public NetworkTextReplaceContext(Player player) {
-        super(player, ContextHolder.trustedMutable(MiscUtils.init(new HashMap<>(4), (m) -> {
-            m.put(DirectContextParameters.PLAYER, () -> player);
-        })));
+    public NetworkTextReplaceContext(@NotNull Player player) {
+        super(player, ContextHolder.builder(DirectContextParameters.PLAYER, player).build());
+    }
+
+    public NetworkTextReplaceContext(@NotNull Player player, @NotNull ContextHolder contexts) {
+        super(player, contexts);
     }
 
     public static @NotNull NetworkTextReplaceContext of(Player player) {
         return new NetworkTextReplaceContext(player);
+    }
+
+    public static @NotNull NetworkTextReplaceContext of(Player player, @NotNull ContextHolder contexts) {
+        return new NetworkTextReplaceContext(player, contexts);
     }
 
     @Override
@@ -26,9 +27,8 @@ public final class NetworkTextReplaceContext extends PlayerOptionalContext imple
         return super.player;
     }
 
-    @NotNull
-    protected TagResolver[] getInternalTagResolvers() {
-        return new TagResolver[]{ShiftTag.INSTANCE, ImageTag.INSTANCE, I18NTag.INSTANCE, new NetworkL10NTag(this), new NamedArgumentTag(this),
-                new PlaceholderTag(this), ExpressionTag.INSTANCE, GlobalVariableTag.INSTANCE};
+    @Override
+    public boolean isPlayerPresent() {
+        return true;
     }
 }
