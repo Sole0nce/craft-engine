@@ -35,3 +35,6 @@ build/
 /runFolia/
 /buildSrc/.kotlin/
 /target
+
+# 上游已把 client-mod 子模块从仓库树移除，本地残留检出目录不入库
+/client-mod/
